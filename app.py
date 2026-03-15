@@ -81,9 +81,10 @@ def _hash_pw(password: str) -> str:
 
 def _ensure_demo_users(conn):
     users = [
-        ("admin@humanizeai.com",  "admin123",   "Admin",       "unlimited", 1),
-        ("demo@humanizeai.com",   "demo1234",   "Demo User",   "pro",       0),
-        ("free@humanizeai.com",   "free1234",   "Free User",   "free",      0),
+        # email,                   password,     name,         plan,        is_admin
+        ("admin@humanizeai.com",  "admin123",   "admin",      "unlimited", 1),
+        ("demo@humanizeai.com",   "demo1234",   "Demo User",  "pro",       0),
+        ("free@humanizeai.com",   "free1234",   "Free User",  "free",      0),
     ]
     for email, pw, name, plan, is_admin in users:
         existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
@@ -91,6 +92,12 @@ def _ensure_demo_users(conn):
             conn.execute(
                 "INSERT INTO users (email,password_hash,name,plan,is_admin) VALUES (?,?,?,?,?)",
                 (email, _hash_pw(pw), name, plan, is_admin)
+            )
+        else:
+            # Update name to lowercase so LOWER() match works for existing DBs
+            conn.execute(
+                "UPDATE users SET name=LOWER(name) WHERE email=? AND is_admin=1",
+                (email,)
             )
     conn.commit()
 
@@ -737,29 +744,44 @@ if st.session_state.app_mode == "admin":
           <div class="admin-hero-sub">HumanizeAI · NYZTrade Analytics</div>
         </div>""", unsafe_allow_html=True)
 
-        _, center, _ = st.columns([1,1.2,1])
+        _, center, _ = st.columns([1, 1.4, 1])
         with center:
-            st.markdown('<div style="background:white;border:1px solid #d4c9b5;border-radius:14px;padding:2rem;">', unsafe_allow_html=True)
-            st.markdown("##### Admin Sign In")
-            adm_user = st.text_input("Username", key="adm_u", placeholder="admin username")
-            adm_pass = st.text_input("Password", key="adm_p", type="password", placeholder="••••••••")
-            if st.button("🔐 Enter Admin Portal", type="primary", use_container_width=True, key="do_admin_login"):
-                if adm_user and adm_pass:
-                    # Admin login: check is_admin=1 flag
-                    conn = get_db()
-                    adm = conn.execute(
-                        "SELECT * FROM users WHERE (email=? OR name=?) AND password_hash=? AND is_admin=1",
-                        (adm_user, adm_user, _hash_pw(adm_pass))
-                    ).fetchone()
-                    conn.close()
-                    if adm:
-                        st.session_state.admin_user = dict(adm)
-                        st.rerun()
+            # Use native Streamlit container — no raw HTML wrappers
+            with st.container(border=True):
+                st.markdown(
+                    '<p style="font-family:Playfair Display,serif;font-size:1.1rem;'
+                    'font-weight:700;color:#1a1a2e;margin-bottom:0.3rem;">Admin Sign In</p>',
+                    unsafe_allow_html=True
+                )
+                st.markdown(
+                    '<p style="font-size:0.82rem;color:#5a6a7a;margin-bottom:1rem;">'
+                    'Enter your admin username or email</p>',
+                    unsafe_allow_html=True
+                )
+                adm_user = st.text_input("Username / Email", key="adm_u",
+                                          placeholder="e.g. Admin or admin@humanizeai.com")
+                adm_pass = st.text_input("Password", key="adm_p",
+                                          type="password", placeholder="••••••••")
+                if st.button("🔐 Enter Admin Portal", type="primary",
+                             use_container_width=True, key="do_admin_login"):
+                    if adm_user and adm_pass:
+                        conn = get_db()
+                        adm = conn.execute(
+                            "SELECT * FROM users WHERE "
+                            "(LOWER(email)=LOWER(?) OR LOWER(name)=LOWER(?)) "
+                            "AND password_hash=? AND is_admin=1",
+                            (adm_user, adm_user, _hash_pw(adm_pass))
+                        ).fetchone()
+                        conn.close()
+                        if adm:
+                            st.session_state.admin_user = dict(adm)
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid credentials or not an admin account.")
+                            st.caption("Default: username **Admin** · password **admin123**")
                     else:
-                        st.error("❌ Invalid admin credentials or insufficient permissions.")
-                else:
-                    st.warning("Please fill in all fields.")
-            st.markdown("</div>", unsafe_allow_html=True)
+                        st.warning("Please fill in all fields.")
+
             if st.button("← Back to User App", use_container_width=True, key="back_to_user"):
                 st.session_state.app_mode = "user"
                 st.rerun()
@@ -1138,7 +1160,7 @@ with st.sidebar:
 # ── HERO ───────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="hero-banner">
-  <div class="hero-badge">v5.2 · Production</div>
+  <div class="hero-badge">v5.3 · Production</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Welcome back, {user['name']} · {plan_info['label']} Plan · {max(0,limit-used_words):,} words remaining today</div>
 </div>""", unsafe_allow_html=True)
