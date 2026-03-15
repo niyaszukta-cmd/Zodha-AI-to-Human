@@ -431,8 +431,8 @@ def chunk_text(text: str, max_words: int = 800) -> list:
     return chunks if chunks else [text]
 
 
-def humanize_chunk(ollama_url: str, model: str, chunk: str, style: str, intensity: str) -> str:
-    system_prompt = STYLE_PROMPTS[style]
+def _build_prompt(style: str, intensity: str, chunk: str) -> tuple:
+    system_prompt  = STYLE_PROMPTS[style]
     intensity_note = INTENSITY_INSTRUCTIONS[intensity]
     user_prompt = f"""{intensity_note}
 
@@ -450,6 +450,11 @@ TEXT TO REWRITE:
 {chunk}
 \"\"\"
 """
+    return system_prompt, user_prompt
+
+
+def humanize_chunk_ollama(ollama_url: str, model: str, chunk: str, style: str, intensity: str) -> str:
+    system_prompt, user_prompt = _build_prompt(style, intensity, chunk)
     payload = {
         "model": model,
         "messages": [
@@ -462,6 +467,29 @@ TEXT TO REWRITE:
     resp = requests.post(f"{ollama_url}/api/chat", json=payload, timeout=300)
     resp.raise_for_status()
     return resp.json()["message"]["content"].strip()
+
+
+def humanize_chunk_groq(api_key: str, model: str, chunk: str, style: str, intensity: str) -> str:
+    system_prompt, user_prompt = _build_prompt(style, intensity, chunk)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ],
+        "max_tokens": 2048,
+        "temperature": 0.7,
+    }
+    resp = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers=headers, json=payload, timeout=120
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"].strip()
 
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────
@@ -477,42 +505,94 @@ with st.sidebar:
     st.markdown("### 🔧 Rewrite Intensity")
     intensity = st.radio("Intensity", ["Light", "Moderate", "Deep"], index=1, label_visibility="collapsed")
 
-    st.markdown("### 🌐 Ollama Settings")
-    ollama_url = st.text_input(
-        "Ollama URL", value="http://localhost:11434",
-        label_visibility="collapsed",
-        help="Default: http://localhost:11434",
+    # ── Backend selector ─────────────────────────────────
+    st.markdown("### 🔌 Backend")
+    backend = st.radio(
+        "Backend", ["🦙 Ollama (Local)", "⚡ Groq (Cloud Free)"],
+        index=0, label_visibility="collapsed",
     )
 
-    st.markdown("### 🤖 Model")
+    st.markdown("---")
 
-    # Fetch available models from Ollama
-    available_models = []
-    try:
-        r = requests.get(f"{ollama_url}/api/tags", timeout=5)
-        if r.status_code == 200:
-            available_models = [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        pass
-
-    RECOMMENDED = ["llama3.2:latest", "llama3.1:latest", "llama3:latest",
-                   "mistral:latest", "mixtral:latest", "gemma2:latest",
-                   "phi3:latest", "qwen2.5:latest"]
-
-    if available_models:
-        model_choice = st.selectbox("Model", available_models, label_visibility="collapsed")
-        st.markdown(
-            f'<div style="font-size:0.72rem;color:rgba(255,255,255,0.5);margin-top:0.2rem;">' +
-            f'✅ {len(available_models)} model(s) found</div>',
-            unsafe_allow_html=True
+    if backend == "🦙 Ollama (Local)":
+        st.markdown("### 🌐 Ollama URL")
+        ollama_url = st.text_input(
+            "Ollama URL", value="http://localhost:11434",
+            label_visibility="collapsed",
+            help="Default: http://localhost:11434",
         )
-    else:
-        model_choice = st.selectbox("Model", RECOMMENDED, label_visibility="collapsed")
-        st.markdown(
-            '<div style="font-size:0.72rem;color:#e87a7a;margin-top:0.2rem;">' +
-            '⚠️ Ollama not detected — is it running?</div>',
-            unsafe_allow_html=True
+        groq_key = ""
+
+        st.markdown("### 🤖 Model")
+        available_models = []
+        try:
+            r = requests.get(f"{ollama_url}/api/tags", timeout=3)
+            if r.status_code == 200:
+                available_models = [m["name"] for m in r.json().get("models", [])]
+        except Exception:
+            pass
+
+        OLLAMA_MODELS = ["llama3.2:latest", "llama3.1:latest", "llama3:latest",
+                         "mistral:latest", "mixtral:latest", "gemma2:latest",
+                         "phi3:latest", "qwen2.5:latest"]
+        if available_models:
+            model_choice = st.selectbox("Model", available_models, label_visibility="collapsed")
+            st.markdown(
+                f'<div style="font-size:0.72rem;color:#6fcf97;margin-top:0.3rem;">' +
+                f'✅ {len(available_models)} local model(s) detected</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            model_choice = st.selectbox("Model", OLLAMA_MODELS, label_visibility="collapsed")
+            st.markdown(
+                '<div style="font-size:0.72rem;color:#e8c97a;margin-top:0.3rem;">' +
+                '⚠️ Ollama not running — start with <code>ollama serve</code></div>',
+                unsafe_allow_html=True
+            )
+        st.markdown("""
+        <div style="font-size:0.72rem;color:rgba(255,255,255,0.3);margin-top:0.8rem;line-height:1.5;">
+        💻 Runs 100% locally · No internet needed<br>
+        Install: <b>ollama.com/download</b>
+        </div>""", unsafe_allow_html=True)
+
+    else:  # Groq
+        ollama_url = ""
+        st.markdown("### 🔑 Groq API Key")
+        groq_key = st.text_input(
+            "Groq API Key", type="password",
+            placeholder="gsk_...",
+            label_visibility="collapsed",
+            help="Free at console.groq.com — no credit card needed",
         )
+
+        GROQ_MODELS = {
+            "llama-3.3-70b-versatile": "Llama 3.3 70B · Best quality",
+            "llama-3.1-8b-instant":    "Llama 3.1 8B · Fastest",
+            "mixtral-8x7b-32768":      "Mixtral 8x7B · Long context",
+            "gemma2-9b-it":            "Gemma 2 9B · Balanced",
+        }
+        model_choice = st.selectbox(
+            "Model",
+            list(GROQ_MODELS.keys()),
+            format_func=lambda x: GROQ_MODELS[x],
+            label_visibility="collapsed",
+        )
+        if groq_key:
+            st.markdown(
+                '<div style="font-size:0.72rem;color:#6fcf97;margin-top:0.3rem;">✅ API key entered</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                '<div style="font-size:0.72rem;color:#e8c97a;margin-top:0.3rem;">' +
+                '🔑 Get free key at <b>console.groq.com</b></div>',
+                unsafe_allow_html=True
+            )
+        st.markdown("""
+        <div style="font-size:0.72rem;color:rgba(255,255,255,0.3);margin-top:0.8rem;line-height:1.5;">
+        ☁️ Cloud · Free tier · No credit card<br>
+        ~300 req/day free on Groq
+        </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("""
@@ -532,7 +612,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("""
     <div style="font-size:0.72rem; color:rgba(255,255,255,0.3);">
-    100% local · No internet after setup.<br>
     Processes 5000+ words in chunks.<br>
     Zero external scoring dependencies.
     </div>
@@ -543,9 +622,9 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v3.0 · Ollama Local</div>
+  <div class="hero-badge">v3.1 · Dual Backend</div>
   <div class="hero-title">HumanizeAI</div>
-  <div class="hero-sub">100% local AI rewriting via Ollama · No API costs · No internet required · Intelligent scoring</div>
+  <div class="hero-sub">Ollama (local) or Groq (free cloud) · 5000+ words · 8-dimension humanness scoring</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -621,11 +700,14 @@ with btn_col:
 with info_col:
     if not input_text.strip():
         st.info("📄 Paste your text in the input panel above.")
+    elif backend == "⚡ Groq (Cloud Free)" and not groq_key:
+        st.warning("🔑 Enter your Groq API key in the sidebar. Free at console.groq.com")
     else:
         chunks = chunk_text(input_text)
+        icon = "🦙" if "Ollama" in backend else "⚡"
         st.markdown(
-            f'<div class="wc-badge">🔀 Will process in {len(chunks)} chunk{"s" if len(chunks)>1 else ""} '
-            f'· {model_choice} · {intensity}</div>',
+            f'<div class="wc-badge">{icon} {len(chunks)} chunk{"s" if len(chunks)>1 else ""} '
+            f'· {model_choice.split(":")[0]} · {intensity}</div>',
             unsafe_allow_html=True,
         )
 
@@ -635,31 +717,50 @@ with info_col:
 if run_btn:
     if not input_text.strip():
         st.error("Please enter some text to humanize.")
+    elif backend == "⚡ Groq (Cloud Free)" and not groq_key:
+        st.error("🔑 Please enter your Groq API key in the sidebar.")
     else:
+        use_groq = (backend == "⚡ Groq (Cloud Free)")
         try:
-            # Quick connectivity check
-            try:
-                ping = requests.get(f"{ollama_url}/api/tags", timeout=5)
-                ping.raise_for_status()
-            except Exception:
-                st.error(
-                    f"❌ Cannot reach Ollama at **{ollama_url}**. "
-                    "Make sure Ollama is running (`ollama serve`) and the URL is correct."
+            # ── Pre-flight check ──────────────────────────────────────────
+            if not use_groq:
+                try:
+                    ping = requests.get(f"{ollama_url}/api/tags", timeout=5)
+                    ping.raise_for_status()
+                except Exception:
+                    st.error(
+                        f"❌ Cannot reach Ollama at **{ollama_url}**. "
+                        "Make sure Ollama is running (`ollama serve`) and the URL is correct."
+                    )
+                    st.stop()
+            else:
+                # Light Groq auth check
+                test_resp = requests.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {groq_key}"}, timeout=10
                 )
-                st.stop()
+                if test_resp.status_code == 401:
+                    st.error("❌ Invalid Groq API key. Check it at console.groq.com")
+                    st.stop()
 
             chunks = chunk_text(input_text)
             n = len(chunks)
             progress_bar = st.progress(0, text="Initialising…")
             status_box   = st.empty()
             results = []
+            icon = "⚡" if use_groq else "🦙"
+            backend_label = f"Groq/{model_choice}" if use_groq else model_choice
+
             for i, chunk in enumerate(chunks):
                 status_box.markdown(
-                    f'<div class="wc-badge">⚡ Processing chunk {i+1} of {n} ' +
-                    f'({len(chunk.split())} words) via {model_choice}…</div>',
+                    f'<div class="wc-badge">{icon} Processing chunk {i+1}/{n} ' +
+                    f'({len(chunk.split())} words) via {backend_label}…</div>',
                     unsafe_allow_html=True,
                 )
-                humanized = humanize_chunk(ollama_url, model_choice, chunk, style, intensity)
+                if use_groq:
+                    humanized = humanize_chunk_groq(groq_key, model_choice, chunk, style, intensity)
+                else:
+                    humanized = humanize_chunk_ollama(ollama_url, model_choice, chunk, style, intensity)
                 results.append(humanized)
                 progress_bar.progress((i + 1) / n, text=f"Chunk {i+1}/{n} complete")
 
@@ -668,10 +769,18 @@ if run_btn:
             st.session_state.output_text = "\n\n".join(results)
             st.rerun()
 
-        except requests.exceptions.ConnectionError:
-            st.error(f"❌ Connection refused at {ollama_url}. Run `ollama serve` first.")
+        except requests.exceptions.ConnectionError as e:
+            if use_groq:
+                st.error("❌ Cannot reach Groq API. Check your internet connection.")
+            else:
+                st.error(f"❌ Connection refused at {ollama_url}. Run `ollama serve` first.")
         except requests.exceptions.Timeout:
-            st.error("⏱️ Request timed out. The model may be loading — try again in a moment.")
+            st.error("⏱️ Request timed out. Try again — the model may still be loading.")
+        except requests.exceptions.HTTPError as e:
+            if use_groq and e.response.status_code == 429:
+                st.error("⚠️ Groq rate limit hit. Wait a moment and try again (free tier: ~30 req/min).")
+            else:
+                st.error(f"❌ HTTP Error: {str(e)}")
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
 
