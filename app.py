@@ -311,38 +311,38 @@ div[data-testid="stAlert"] p { color: #1a1a2e !important; }
 
 def make_copy_btn(copy_id: str, text: str, label: str = "📋 Copy",
                   color: str = "#c9a84c", bg: str = "#1a1a2e", border: str = "#c9a84c") -> str:
-    """Render a robust clipboard copy button with execCommand fallback."""
-    safe = (text
-            .replace("\\", "\\\\")
-            .replace("`", "\\`")
-            .replace("$", "\\$")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;"))
-    return f'''
-<div style="margin-top:0.5rem;display:flex;gap:0.6rem;align-items:center;">
+    """Copy button that reads from a hidden textarea — no JS string escaping needed."""
+    import html as _html
+    # Store text safely in a hidden textarea — HTML entities handle all special chars
+    safe_html = _html.escape(text, quote=True)
+    return f'''<div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;">
+  <textarea id="txt-{copy_id}" readonly style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;">{safe_html}</textarea>
   <button id="btn-{copy_id}"
     onclick="(function(){{
-      var txt = `{safe}`;
+      var el = document.getElementById('txt-{copy_id}');
+      var txt = el.value;
       if(navigator.clipboard && window.isSecureContext){{
         navigator.clipboard.writeText(txt).then(function(){{
-          var b=document.getElementById('btn-{copy_id}');
-          b.innerHTML='✅ Copied!';
-          setTimeout(function(){{b.innerHTML='{label}';}},2000);
+          var b = document.getElementById('btn-{copy_id}');
+          b.innerHTML = '✅ Copied!';
+          setTimeout(function(){{ b.innerHTML = '{label}'; }}, 2000);
+        }}).catch(function(){{
+          el.select(); document.execCommand('copy');
+          var b = document.getElementById('btn-{copy_id}');
+          b.innerHTML = '✅ Copied!';
+          setTimeout(function(){{ b.innerHTML = '{label}'; }}, 2000);
         }});
       }} else {{
-        var ta=document.createElement('textarea');
-        ta.value=txt; ta.style.cssText='position:fixed;opacity:0;top:0;left:0;';
-        document.body.appendChild(ta); ta.focus(); ta.select();
-        try{{document.execCommand('copy');}}catch(e){{}}
-        document.body.removeChild(ta);
-        var b=document.getElementById('btn-{copy_id}');
-        b.innerHTML='✅ Copied!';
-        setTimeout(function(){{b.innerHTML='{label}';}},2000);
+        el.select(); el.setSelectionRange(0, 99999);
+        try{{ document.execCommand('copy'); }}catch(e){{}}
+        var b = document.getElementById('btn-{copy_id}');
+        b.innerHTML = '✅ Copied!';
+        setTimeout(function(){{ b.innerHTML = '{label}'; }}, 2000);
       }}
     }})();"
     style="background:{bg};color:{color};border:1.5px solid {border};border-radius:8px;
            padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;
-           font-family:'DM Sans',sans-serif;transition:opacity 0.2s;">
+           font-family:'DM Sans',sans-serif;font-weight:500;transition:all 0.2s;">
     {label}
   </button>
 </div>'''
@@ -874,7 +874,7 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v4.2 · Full Suite</div>
+  <div class="hero-badge">v4.3 · Full Suite</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Ollama & Groq · 8-dimension scoring</div>
 </div>
@@ -969,8 +969,10 @@ with tab1:
         output_text = st.session_state.output_text
 
         if output_text.strip():
+            import html as _html
+            _safe_out = _html.escape(output_text)
             st.markdown(
-                f'<div class="output-box">{output_text}</div>',
+                f'<div class="output-box">{_safe_out}</div>',
                 unsafe_allow_html=True,
             )
             # ── Copy button (robust fallback) ──────────────────────────
@@ -1051,8 +1053,10 @@ with tab2:
         para_out = st.session_state.paraphrase_out
 
         if para_out.strip():
+            import html as _html
+            _safe_para = _html.escape(para_out)
             st.markdown(
-                f'<div class="output-box-para">{para_out}</div>',
+                f'<div class="output-box-para">{_safe_para}</div>',
                 unsafe_allow_html=True,
             )
             _copy_html2 = make_copy_btn("para-out", para_out, "📋 Copy")
@@ -1107,8 +1111,10 @@ with tab3:
         gram_corrected = st.session_state.grammar_corrected
 
         if gram_corrected.strip():
+            import html as _html
+            _safe_gram = _html.escape(gram_corrected)
             st.markdown(
-                f'<div style="background:white;border:1.5px solid #4a7c59;border-radius:10px;padding:1.1rem 1.3rem;height:260px;overflow-y:auto;font-family:DM Sans,sans-serif;font-size:0.9rem;line-height:1.7;color:#1a1a2e;white-space:pre-wrap;word-break:break-word;">{gram_corrected}</div>',
+                f'<div style="background:white;border:1.5px solid #4a7c59;border-radius:10px;padding:1.1rem 1.3rem;height:260px;overflow-y:auto;font-family:DM Sans,sans-serif;font-size:0.9rem;line-height:1.7;color:#1a1a2e;white-space:pre-wrap;word-break:break-word;">{_safe_gram}</div>',
                 unsafe_allow_html=True,
             )
             _copy_html3 = make_copy_btn("gram-out", gram_corrected, "📋 Copy Corrected", "#6fcf97", "#1a3a2e", "#4a7c59")
