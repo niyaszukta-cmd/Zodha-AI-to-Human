@@ -173,6 +173,92 @@ def check_quota(user_id: int, plan: str, words_needed: int) -> tuple:
         return False, used, limit, remaining
     return True, used, limit, remaining
 
+# ── ADMIN DB FUNCTIONS ─────────────────────────────────────────────────────
+
+def admin_get_all_users() -> list:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT u.id, u.name, u.email, u.plan, u.is_admin, u.created_at, "
+        "COALESCE(SUM(CASE WHEN l.log_date=date('now') THEN l.words_in+l.words_out ELSE 0 END),0) as today_words, "
+        "COALESCE(SUM(l.words_in+l.words_out),0) as total_words, "
+        "COUNT(DISTINCT l.log_date) as active_days "
+        "FROM users u LEFT JOIN usage_log l ON u.id=l.user_id "
+        "GROUP BY u.id ORDER BY u.created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def admin_update_user_plan(user_id: int, plan: str):
+    conn = get_db()
+    conn.execute("UPDATE users SET plan=? WHERE id=?", (plan, user_id))
+    conn.commit(); conn.close()
+
+def admin_delete_user(user_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM usage_log WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit(); conn.close()
+
+def admin_reset_user_key(user_id: int):
+    conn = get_db()
+    conn.execute("UPDATE users SET groq_key='' WHERE id=?", (user_id,))
+    conn.commit(); conn.close()
+
+def admin_get_platform_stats() -> dict:
+    conn = get_db()
+    total_users  = conn.execute("SELECT COUNT(*) FROM users WHERE is_admin=0").fetchone()[0]
+    total_words  = conn.execute("SELECT COALESCE(SUM(words_in+words_out),0) FROM usage_log").fetchone()[0]
+    today_words  = conn.execute(
+        "SELECT COALESCE(SUM(words_in+words_out),0) FROM usage_log WHERE log_date=date('now')"
+    ).fetchone()[0]
+    today_calls  = conn.execute(
+        "SELECT COUNT(*) FROM usage_log WHERE log_date=date('now')"
+    ).fetchone()[0]
+    active_today = conn.execute(
+        "SELECT COUNT(DISTINCT user_id) FROM usage_log WHERE log_date=date('now')"
+    ).fetchone()[0]
+    plan_dist    = conn.execute(
+        "SELECT plan, COUNT(*) as cnt FROM users WHERE is_admin=0 GROUP BY plan"
+    ).fetchall()
+    tool_dist    = conn.execute(
+        "SELECT tool, COUNT(*) as cnt, SUM(words_in+words_out) as words FROM usage_log GROUP BY tool"
+    ).fetchall()
+    weekly = conn.execute(
+        "SELECT log_date, SUM(words_in+words_out) as words, COUNT(*) as calls "
+        "FROM usage_log WHERE log_date >= date('now','-6 days') "
+        "GROUP BY log_date ORDER BY log_date ASC"
+    ).fetchall()
+    conn.close()
+    return {
+        "total_users": total_users,
+        "total_words": total_words,
+        "today_words": today_words,
+        "today_calls": today_calls,
+        "active_today": active_today,
+        "plan_dist":  {r["plan"]: r["cnt"] for r in plan_dist},
+        "tool_dist":  {r["tool"]: {"calls": r["cnt"], "words": r["words"] or 0} for r in tool_dist},
+        "weekly":     [{"date": r["log_date"], "words": r["words"] or 0, "calls": r["calls"]} for r in weekly],
+    }
+
+def admin_set_platform_groq_key(key: str):
+    """Store a platform-wide Groq key that admin users can use without entering their own."""
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM users WHERE email='__platform__'").fetchone()
+    if existing:
+        conn.execute("UPDATE users SET groq_key=? WHERE email='__platform__'", (key,))
+    else:
+        conn.execute(
+            "INSERT INTO users (email,password_hash,name,plan,groq_key,is_admin) VALUES (?,?,?,?,?,?)",
+            ("__platform__", "", "Platform", "unlimited", key, 1)
+        )
+    conn.commit(); conn.close()
+
+def admin_get_platform_groq_key() -> str:
+    conn = get_db()
+    row = conn.execute("SELECT groq_key FROM users WHERE email='__platform__'").fetchone()
+    conn.close()
+    return (row["groq_key"] or "") if row else ""
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ZERO-DEPENDENCY READABILITY ENGINE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -609,15 +695,25 @@ div[data-testid="stAlert"] p{color:#1a1a2e!important;}
 .auth-container{max-width:420px;margin:2rem auto;background:white;border:1px solid var(--border);border-radius:16px;padding:2rem;}
 .auth-title{font-family:'Playfair Display',serif;font-size:1.6rem;font-weight:900;color:var(--ink);margin-bottom:0.3rem;}
 .auth-sub{font-size:0.88rem;color:var(--slate);margin-bottom:1.5rem;}
+/* Admin dashboard */
+.admin-stat-card{background:white;border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.4rem;text-align:center;}
+.admin-stat-num{font-family:'Playfair Display',serif;font-size:2rem;font-weight:900;color:var(--ink);}
+.admin-stat-label{font-size:0.75rem;color:var(--slate);text-transform:uppercase;letter-spacing:0.8px;margin-top:0.2rem;}
+.admin-stat-sub{font-size:0.72rem;color:#6fcf97;margin-top:0.1rem;font-weight:600;}
+.admin-user-row{background:white;border:1px solid var(--border);border-radius:10px;padding:0.8rem 1rem;margin-bottom:0.5rem;display:flex;align-items:center;gap:0.8rem;}
+.admin-hero{background:linear-gradient(135deg,#0d0d1a 0%,#1a0a2e 50%,#0a1a2e 100%);border-radius:16px;padding:1.5rem 2.5rem;margin-bottom:1.5rem;position:relative;}
+.admin-hero-title{font-family:'Playfair Display',serif;font-size:2rem;font-weight:900;color:#b87ae8;}
+.admin-hero-sub{font-size:0.88rem;color:rgba(255,255,255,0.55);}
+.admin-badge{position:absolute;top:1.2rem;right:2rem;background:rgba(184,122,232,0.15);border:1px solid rgba(184,122,232,0.4);color:#b87ae8;border-radius:20px;padding:0.3rem 0.9rem;font-size:0.75rem;font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:1px;}
 </style>
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
-for k,v in [("user",None),("auth_tab","login"),("output_text",""),
+for k,v in [("user",None),("admin_user",None),("auth_tab","login"),("output_text",""),
              ("paraphrase_out",""),("grammar_corrected",""),("grammar_issues",[]),
-             ("clear_input",False),("streaming",False)]:
+             ("clear_input",False),("streaming",False),("app_mode","user")]:
     if k not in st.session_state: st.session_state[k]=v
 
 if st.session_state.clear_input:
@@ -626,8 +722,265 @@ if st.session_state.clear_input:
     st.session_state.clear_input=False
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AUTH GATE — show login/register if not logged in
+# ROUTING — Admin portal vs User app (separate login flows)
 # ══════════════════════════════════════════════════════════════════════════════
+
+# ── ADMIN PORTAL ──────────────────────────────────────────────────────────────
+if st.session_state.app_mode == "admin":
+
+    # Admin login gate
+    if not st.session_state.admin_user:
+        st.markdown("""
+        <div class="admin-hero" style="margin-top:2rem;max-width:480px;margin-left:auto;margin-right:auto;">
+          <div class="admin-badge">Admin Portal</div>
+          <div class="admin-hero-title">🛡️ Admin Access</div>
+          <div class="admin-hero-sub">HumanizeAI · NYZTrade Analytics</div>
+        </div>""", unsafe_allow_html=True)
+
+        _, center, _ = st.columns([1,1.2,1])
+        with center:
+            st.markdown('<div style="background:white;border:1px solid #d4c9b5;border-radius:14px;padding:2rem;">', unsafe_allow_html=True)
+            st.markdown("##### Admin Sign In")
+            adm_user = st.text_input("Username", key="adm_u", placeholder="admin username")
+            adm_pass = st.text_input("Password", key="adm_p", type="password", placeholder="••••••••")
+            if st.button("🔐 Enter Admin Portal", type="primary", use_container_width=True, key="do_admin_login"):
+                if adm_user and adm_pass:
+                    # Admin login: check is_admin=1 flag
+                    conn = get_db()
+                    adm = conn.execute(
+                        "SELECT * FROM users WHERE (email=? OR name=?) AND password_hash=? AND is_admin=1",
+                        (adm_user, adm_user, _hash_pw(adm_pass))
+                    ).fetchone()
+                    conn.close()
+                    if adm:
+                        st.session_state.admin_user = dict(adm)
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid admin credentials or insufficient permissions.")
+                else:
+                    st.warning("Please fill in all fields.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            if st.button("← Back to User App", use_container_width=True, key="back_to_user"):
+                st.session_state.app_mode = "user"
+                st.rerun()
+        st.stop()
+
+    # ── ADMIN DASHBOARD ──────────────────────────────────────────────────────
+    adm = st.session_state.admin_user
+    stats = admin_get_platform_stats()
+
+    # Admin hero
+    st.markdown(f"""
+    <div class="admin-hero">
+      <div class="admin-badge">Admin · {adm['name']}</div>
+      <div class="admin-hero-title">🛡️ Admin Dashboard</div>
+      <div class="admin-hero-sub">Platform Overview · User Management · System Settings</div>
+    </div>""", unsafe_allow_html=True)
+
+    # Admin sidebar
+    with st.sidebar:
+        st.markdown(f"""
+        <div style="padding:0.8rem;background:rgba(184,122,232,0.1);border-radius:10px;margin-bottom:1rem;border:1px solid rgba(184,122,232,0.3);">
+          <div style="font-family:'Playfair Display',serif;color:#b87ae8;font-weight:700;">🛡️ {adm['name']}</div>
+          <div style="font-size:0.72rem;color:rgba(255,255,255,0.4);margin-top:0.2rem;">Administrator</div>
+        </div>""", unsafe_allow_html=True)
+        if st.button("← Exit Admin / Go to App", use_container_width=True, key="exit_admin"):
+            st.session_state.app_mode = "user"
+            st.session_state.admin_user = None
+            st.rerun()
+        if st.button("🚪 Sign Out Completely", use_container_width=True, key="admin_signout"):
+            st.session_state.admin_user = None
+            st.session_state.user = None
+            st.session_state.app_mode = "user"
+            st.rerun()
+
+    # ── Stats row ──────────────────────────────────────────────────────────
+    s1,s2,s3,s4,s5 = st.columns(5)
+    for col, num, label, sub in [
+        (s1, stats["total_users"],  "Total Users",    "registered"),
+        (s2, stats["active_today"], "Active Today",   "users"),
+        (s3, f'{stats["today_words"]:,}', "Words Today", "processed"),
+        (s4, stats["today_calls"],  "API Calls Today","requests"),
+        (s5, f'{stats["total_words"]:,}', "Total Words", "all time"),
+    ]:
+        col.markdown(f"""
+        <div class="admin-stat-card">
+          <div class="admin-stat-num">{num}</div>
+          <div class="admin-stat-label">{label}</div>
+          <div class="admin-stat-sub">{sub}</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Admin tabs ─────────────────────────────────────────────────────────
+    adm_tab1, adm_tab2, adm_tab3, adm_tab4 = st.tabs(
+        ["👥 Users", "📊 Analytics", "⚙️ Platform Settings", "🔑 My Admin Account"]
+    )
+
+    # ── TAB 1: USERS ───────────────────────────────────────────────────────
+    with adm_tab1:
+        st.markdown('<div class="card-title">👥 User Management</div>', unsafe_allow_html=True)
+        users_list = admin_get_all_users()
+
+        # Search
+        search = st.text_input("🔍 Search users", placeholder="Name or email…", key="user_search")
+        if search:
+            users_list = [u for u in users_list if search.lower() in u["email"].lower()
+                          or search.lower() in u["name"].lower()]
+
+        st.markdown(f'<span class="wc-badge">Showing {len(users_list)} user(s)</span>', unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        for u in users_list:
+            plan_c = PLANS.get(u["plan"],PLANS["free"])["color"]
+            with st.expander(f"{'🛡️' if u['is_admin'] else '👤'}  {u['name']}  ·  {u['email']}  ·  {u['plan'].upper()}", expanded=False):
+                info_col, action_col = st.columns([2,1])
+                with info_col:
+                    st.markdown(f"""
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-size:0.85rem;">
+                      <div><b style="color:#5a6a7a;">User ID</b><br>{u['id']}</div>
+                      <div><b style="color:#5a6a7a;">Joined</b><br>{u['created_at'][:10]}</div>
+                      <div><b style="color:#5a6a7a;">Words Today</b><br><b style="color:#c9a84c;">{u['today_words']:,}</b></div>
+                      <div><b style="color:#5a6a7a;">Total Words</b><br><b>{u['total_words']:,}</b></div>
+                      <div><b style="color:#5a6a7a;">Active Days</b><br>{u['active_days']}</div>
+                      <div><b style="color:#5a6a7a;">Daily Limit</b><br>{PLANS.get(u["plan"],PLANS["free"])["daily_words"]:,}</div>
+                    </div>""", unsafe_allow_html=True)
+                with action_col:
+                    st.markdown(f'<span class="plan-badge" style="background:{plan_c}22;color:{plan_c};border:1px solid {plan_c}44;">{u["plan"].upper()}</span>', unsafe_allow_html=True)
+                    new_plan = st.selectbox("Change Plan", list(PLANS.keys()),
+                                           index=list(PLANS.keys()).index(u["plan"]),
+                                           key=f"plan_{u['id']}")
+                    if new_plan != u["plan"]:
+                        if st.button(f"✅ Apply Plan", key=f"apply_{u['id']}"):
+                            admin_update_user_plan(u["id"], new_plan)
+                            st.success(f"Plan updated to {new_plan}")
+                            st.rerun()
+                    if not u["is_admin"]:
+                        c1,c2 = st.columns(2)
+                        with c1:
+                            if st.button("🔑 Reset Key", key=f"rk_{u['id']}", use_container_width=True):
+                                admin_reset_user_key(u["id"])
+                                st.success("Groq key cleared.")
+                                st.rerun()
+                        with c2:
+                            if st.button("🗑️ Delete", key=f"del_{u['id']}", use_container_width=True):
+                                admin_delete_user(u["id"])
+                                st.warning(f"User {u['email']} deleted.")
+                                st.rerun()
+
+    # ── TAB 2: ANALYTICS ───────────────────────────────────────────────────
+    with adm_tab2:
+        st.markdown('<div class="card-title">📊 Platform Analytics</div>', unsafe_allow_html=True)
+
+        # Plan distribution
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            st.markdown("**Plan Distribution**")
+            for plan_id, cnt in stats["plan_dist"].items():
+                pc = PLANS.get(plan_id, PLANS["free"])["color"]
+                pct_v = int(cnt / max(stats["total_users"],1) * 100)
+                st.markdown(f"""
+                <div style="display:flex;align-items:center;gap:0.8rem;margin-bottom:0.5rem;">
+                  <span style="min-width:80px;font-weight:600;color:{pc};">{plan_id.upper()}</span>
+                  <div style="flex:1;background:#f0ebe3;border-radius:4px;height:10px;">
+                    <div style="width:{pct_v}%;background:{pc};border-radius:4px;height:10px;"></div>
+                  </div>
+                  <span style="font-size:0.82rem;color:#5a6a7a;min-width:40px;">{cnt} ({pct_v}%)</span>
+                </div>""", unsafe_allow_html=True)
+
+        with pc2:
+            st.markdown("**Tool Usage**")
+            for tool, data in stats["tool_dist"].items():
+                icon = {"humanizer":"✍️","paraphraser":"🔄","grammar":"✅"}.get(tool,"🔧")
+                st.markdown(f"""
+                <div style="background:white;border:1px solid #d4c9b5;border-radius:8px;
+                     padding:0.6rem 0.9rem;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
+                  <span>{icon} {tool.capitalize()}</span>
+                  <span style="color:#c9a84c;font-weight:600;">{data['calls']} calls · {data['words']:,} words</span>
+                </div>""", unsafe_allow_html=True)
+
+        # Weekly chart
+        st.markdown("<br>**7-Day Activity**")
+        if stats["weekly"]:
+            max_w = max(d["words"] for d in stats["weekly"]) or 1
+            week_html = '<div style="display:flex;align-items:flex-end;gap:0.4rem;height:80px;margin-top:0.5rem;">'
+            for d in stats["weekly"]:
+                h = max(4, int(d["words"]/max_w*70))
+                week_html += f"""
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:0.3rem;">
+                  <div style="font-size:0.62rem;color:#9a8a7a;">{d['words']:,}</div>
+                  <div style="width:100%;height:{h}px;background:#c9a84c;border-radius:3px 3px 0 0;opacity:0.8;"></div>
+                  <div style="font-size:0.6rem;color:#9a8a7a;">{d['date'][5:]}</div>
+                </div>"""
+            week_html += "</div>"
+            st.markdown(week_html, unsafe_allow_html=True)
+        else:
+            st.info("No activity data yet.")
+
+    # ── TAB 3: PLATFORM SETTINGS ───────────────────────────────────────────
+    with adm_tab3:
+        st.markdown('<div class="card-title">⚙️ Platform Settings</div>', unsafe_allow_html=True)
+
+        # Platform-wide Groq key
+        st.markdown("**🔑 Platform Groq API Key**")
+        st.markdown('<div style="font-size:0.82rem;color:#5a6a7a;margin-bottom:0.5rem;">This key is used as a fallback for users who have not set their own Groq key. Ideal for seamless onboarding.</div>', unsafe_allow_html=True)
+        current_platform_key = admin_get_platform_groq_key()
+        new_platform_key = st.text_input("Platform Groq Key", value=current_platform_key,
+                                          type="password", placeholder="gsk_...",
+                                          label_visibility="collapsed")
+        if st.button("💾 Save Platform Key", type="primary"):
+            admin_set_platform_groq_key(new_platform_key)
+            st.success("✅ Platform Groq key saved. Users without their own key will now use this.")
+
+        st.markdown("---")
+        st.markdown("**📋 Plan Limits**")
+        for pid, pinfo in PLANS.items():
+            st.markdown(f"""
+            <div style="background:white;border:1px solid #d4c9b5;border-radius:8px;
+                 padding:0.7rem 1rem;margin-bottom:0.4rem;display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-weight:600;color:{pinfo['color']};">{pinfo['label']}</span>
+              <span style="color:#5a6a7a;">{pinfo['daily_words']:,} words/day</span>
+              <span style="color:#c9a84c;font-weight:700;">{pinfo['price']}</span>
+            </div>""", unsafe_allow_html=True)
+        st.caption("To change plan limits, edit the PLANS dict in the source code.")
+
+    # ── TAB 4: ADMIN ACCOUNT ───────────────────────────────────────────────
+    with adm_tab4:
+        st.markdown('<div class="card-title">🔑 My Admin Account</div>', unsafe_allow_html=True)
+        ac1, ac2 = st.columns([1,1])
+        with ac1:
+            st.markdown(f"""
+            <div style="background:white;border:1px solid #d4c9b5;border-radius:12px;padding:1.2rem;">
+              <div style="font-size:0.75rem;color:#9a8a7a;text-transform:uppercase;letter-spacing:0.8px;">Logged in as</div>
+              <div style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#1a1a2e;margin-top:0.3rem;">{adm['name']}</div>
+              <div style="color:#5a6a7a;font-size:0.85rem;">{adm['email']}</div>
+              <div style="margin-top:0.6rem;"><span class="plan-badge" style="background:#b87ae822;color:#b87ae8;border:1px solid #b87ae844;">Administrator</span></div>
+            </div>""", unsafe_allow_html=True)
+        with ac2:
+            st.markdown("**Change Admin Password**")
+            old_pw   = st.text_input("Current Password", type="password", key="adm_old_pw")
+            new_pw   = st.text_input("New Password",     type="password", key="adm_new_pw")
+            new_pw2  = st.text_input("Confirm New Password", type="password", key="adm_new_pw2")
+            if st.button("🔐 Update Password", type="primary"):
+                if not all([old_pw, new_pw, new_pw2]):
+                    st.warning("Fill in all fields.")
+                elif new_pw != new_pw2:
+                    st.error("New passwords do not match.")
+                elif len(new_pw) < 6:
+                    st.warning("Password must be at least 6 characters.")
+                elif _hash_pw(old_pw) != adm["password_hash"]:
+                    st.error("❌ Current password incorrect.")
+                else:
+                    conn = get_db()
+                    conn.execute("UPDATE users SET password_hash=? WHERE id=?",
+                                 (_hash_pw(new_pw), adm["id"]))
+                    conn.commit(); conn.close()
+                    st.success("✅ Password updated successfully.")
+                    st.session_state.admin_user["password_hash"] = _hash_pw(new_pw)
+
+    st.stop()
+
+# ── USER AUTH GATE ────────────────────────────────────────────────────────────
 if not st.session_state.user:
     st.markdown("""
     <div style="text-align:center;padding:2rem 0 1rem;">
@@ -654,12 +1007,6 @@ if not st.session_state.user:
                         st.error(f"❌ {err}")
                 else:
                     st.warning("Please fill in all fields.")
-            st.markdown("""<div style="font-size:0.8rem;color:#9a8a7a;margin-top:0.8rem;">
-            <b>Demo accounts:</b><br>
-            admin@humanizeai.com / admin123 (Unlimited)<br>
-            demo@humanizeai.com / demo1234 (Pro)<br>
-            free@humanizeai.com / free1234 (Free)
-            </div>""", unsafe_allow_html=True)
 
         with tab_reg:
             st.markdown("##### Create your account")
@@ -691,6 +1038,13 @@ if not st.session_state.user:
                 {plan['daily_words']:,} words / day
               </div>
             </div>""", unsafe_allow_html=True)
+
+        # Admin portal link at bottom
+        st.markdown("---")
+        if st.button("🛡️ Admin Portal", use_container_width=True, key="goto_admin"):
+            st.session_state.app_mode = "admin"
+            st.rerun()
+
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -750,14 +1104,23 @@ with st.sidebar:
         st.session_state.user["groq_key"] = new_key
         st.success("✅ Key saved")
 
-    groq_key = new_key or current_key
+    user_key = new_key or current_key
+    platform_key = admin_get_platform_groq_key()
+    groq_key = user_key or platform_key  # user key takes priority; fall back to platform key
 
-    if groq_key:
-        st.markdown('<div style="font-size:0.72rem;color:#6fcf97;margin-top:0.2rem;">✅ API key saved</div>', unsafe_allow_html=True)
+    if user_key:
+        st.markdown('<div style="font-size:0.72rem;color:#6fcf97;margin-top:0.2rem;">✅ Your API key active</div>', unsafe_allow_html=True)
+    elif platform_key:
+        st.markdown('<div style="font-size:0.72rem;color:#b5d97a;margin-top:0.2rem;">✅ Platform key active (no setup needed)</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div style="font-size:0.72rem;color:#e8c97a;margin-top:0.2rem;">🔑 Add key at console.groq.com (free)</div>', unsafe_allow_html=True)
 
     st.markdown("---")
+    if user.get("is_admin"):
+        if st.button("🛡️ Admin Dashboard", use_container_width=True, key="sb_goto_admin"):
+            st.session_state.app_mode = "admin"
+            st.session_state.admin_user = user
+            st.rerun()
     if st.button("🚪 Sign Out", use_container_width=True):
         st.session_state.user = None
         st.session_state.output_text = ""
@@ -775,7 +1138,7 @@ with st.sidebar:
 # ── HERO ───────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="hero-banner">
-  <div class="hero-badge">v5.1 · Production</div>
+  <div class="hero-badge">v5.2 · Production</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Welcome back, {user['name']} · {plan_info['label']} Plan · {max(0,limit-used_words):,} words remaining today</div>
 </div>""", unsafe_allow_html=True)
