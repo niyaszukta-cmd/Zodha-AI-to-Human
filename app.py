@@ -133,9 +133,11 @@ html, body, [class*="css"] {
 .card-title {
   font-family: 'Playfair Display', serif;
   font-size: 1.05rem; font-weight: 700;
-  color: var(--ink); margin-bottom: 0.8rem;
+  color: #c9a84c !important;
+  margin-bottom: 0.8rem;
   padding-bottom: 0.6rem;
-  border-bottom: 2px solid var(--gold-lt);
+  border-bottom: 2px solid #c9a84c;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
 .score-ring-wrap { display:flex; flex-direction:column; align-items:center; gap:0.3rem; }
@@ -239,7 +241,7 @@ hr { border:none; border-top:1.5px solid var(--border); margin:1.2rem 0; }
 .improvement-banner .score-desc { font-size:0.88rem; color:rgba(255,255,255,0.8); line-height:1.5; }
 
 /* ── Force all main-column text to be visible (dark on light) ── */
-.card-title { color: #1a1a2e !important; }
+.card-title { color: #c9a84c !important; }
 .score-label { color: #5a6a7a !important; }
 .wc-badge { color: #5a6a7a !important; background: #f5f0e8 !important; border-color: #d4c9b5 !important; }
 .metric-chip { color: #5a6a7a !important; background: #f5f0e8 !important; }
@@ -430,6 +432,47 @@ STYLE_PROMPTS = {
     ),
 }
 
+# ── Paraphraser prompts ───────────────────────────────────────────────────
+
+PARAPHRASE_MODES = {
+    "Standard": (
+        "You are an expert paraphraser. Rewrite the following text using completely different "
+        "words and sentence structures while preserving the exact original meaning. "
+        "Output ONLY the paraphrased text with no commentary."
+    ),
+    "Simplify": (
+        "You are a plain-language expert. Rewrite the following text in simpler, clearer language "
+        "that anyone can understand. Use shorter sentences, common words, and active voice. "
+        "Output ONLY the simplified text with no commentary."
+    ),
+    "Formal": (
+        "You are a formal academic writer. Rewrite the following text in a highly formal, "
+        "professional register using precise vocabulary and structured sentences. "
+        "Output ONLY the formal text with no commentary."
+    ),
+    "Concise": (
+        "You are an editor who specialises in conciseness. Rewrite the following text removing "
+        "all redundancy, padding, and unnecessary words — make it as tight as possible "
+        "while keeping every key idea. Output ONLY the concise text, no commentary."
+    ),
+    "Creative": (
+        "You are a creative writer. Paraphrase the following text with vivid, expressive "
+        "language — use fresh metaphors, varied rhythm, and engaging style. "
+        "Preserve all meaning. Output ONLY the paraphrased text, no commentary."
+    ),
+}
+
+# ── Grammar checker prompt ────────────────────────────────────────────────
+
+GRAMMAR_SYSTEM = (
+    "You are a professional copy-editor and grammar expert. "
+    "Carefully proofread the following text and return a JSON response with exactly these keys:\n"
+    "- \"corrected\": the fully corrected text\n"
+    "- \"issues\": a list of objects each with keys \"original\", \"corrected\", \"type\", \"explanation\"\n"
+    "Types: grammar, spelling, punctuation, style, wordiness, clarity\n"
+    "Return ONLY valid JSON, nothing else."
+)
+
 INTENSITY_INSTRUCTIONS = {
     "Light":    "Make subtle improvements — fix robotic phrasing and uniformity, but keep the structure largely intact.",
     "Moderate": "Substantially rewrite for naturalness — restructure sentences, vary rhythm, enrich vocabulary.",
@@ -512,6 +555,61 @@ def humanize_chunk_groq(api_key: str, model: str, chunk: str, style: str, intens
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"].strip()
+
+
+def paraphrase_text(use_groq: bool, ollama_url: str, groq_key: str,
+                    model: str, text: str, mode: str) -> str:
+    system_prompt = PARAPHRASE_MODES[mode]
+    user_msg = f"TEXT TO PARAPHRASE:\n\"\"\"\n{text}\n\"\"\""
+    if use_groq:
+        headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+        payload = {"model": model,
+                   "messages": [{"role":"system","content":system_prompt},
+                                 {"role":"user","content":user_msg}],
+                   "max_tokens": 2048, "temperature": 0.6}
+        resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                             headers=headers, json=payload, timeout=120)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    else:
+        payload = {"model": model,
+                   "messages": [{"role":"system","content":system_prompt},
+                                 {"role":"user","content":user_msg}],
+                   "stream": False, "options": {"num_predict": 2048}}
+        resp = requests.post(f"{ollama_url}/api/chat", json=payload, timeout=300)
+        resp.raise_for_status()
+        return resp.json()["message"]["content"].strip()
+
+
+def grammar_check(use_groq: bool, ollama_url: str, groq_key: str,
+                  model: str, text: str) -> dict:
+    import json
+    user_msg = f"TEXT TO PROOFREAD:\n\"\"\"\n{text}\n\"\"\""
+    if use_groq:
+        headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+        payload = {"model": model,
+                   "messages": [{"role":"system","content":GRAMMAR_SYSTEM},
+                                 {"role":"user","content":user_msg}],
+                   "max_tokens": 3000, "temperature": 0.1}
+        resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                             headers=headers, json=payload, timeout=120)
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+    else:
+        payload = {"model": model,
+                   "messages": [{"role":"system","content":GRAMMAR_SYSTEM},
+                                 {"role":"user","content":user_msg}],
+                   "stream": False, "options": {"num_predict": 3000}}
+        resp = requests.post(f"{ollama_url}/api/chat", json=payload, timeout=300)
+        resp.raise_for_status()
+        raw = resp.json()["message"]["content"].strip()
+    # Strip markdown code fences if present
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {"corrected": raw, "issues": []}
 
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────
@@ -644,113 +742,290 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v3.2 · Dual Backend</div>
+  <div class="hero-badge">v4.0 · Full Suite</div>
   <div class="hero-title">HumanizeAI</div>
-  <div class="hero-sub">Ollama (local) or Groq (free cloud) · 5000+ words · 8-dimension humanness scoring</div>
+  <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Ollama & Groq · 8-dimension scoring</div>
 </div>
 """, unsafe_allow_html=True)
 
 
-# ── MAIN LAYOUT ────────────────────────────────────────────────────────────
+# ── SESSION STATE INIT ────────────────────────────────────────────────────
+for key, default in [
+    ("output_text", ""), ("paraphrase_out", ""),
+    ("grammar_corrected", ""), ("grammar_issues", []),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-col_in, col_out = st.columns([1, 1], gap="large")
+# ── TABS ───────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["✍️  Humanizer", "🔄  Paraphraser", "✅  Grammar Checker"])
 
-with col_in:
-    st.markdown('<div class="card-title">📄 Input Text</div>', unsafe_allow_html=True)
-    input_text = st.text_area(
-        label="Input", height=380,
-        placeholder="Paste your AI-generated text here (5000+ words supported)…",
-        label_visibility="collapsed", key="input_text",
-    )
-    wc_in = len(input_text.split()) if input_text.strip() else 0
-    sc_in = len(re.split(r'[.!?]+', input_text)) if input_text.strip() else 0
-    st.markdown(f'<span class="wc-badge">📝 {wc_in:,} words · {sc_in} sentences</span>', unsafe_allow_html=True)
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 1 — HUMANIZER
+# ══════════════════════════════════════════════════════════════════════════
+with tab1:
+    col_in, col_out = st.columns([1, 1], gap="large")
 
-    if input_text.strip():
-        scores_in = compute_scores(input_text)
-        st.markdown('<p style="color:#1a1a2e;font-weight:600;margin-top:0.8rem;">Before — Humanness Analysis</p>', unsafe_allow_html=True)
-        r1, r2, r3, r4 = st.columns(4)
-        with r1: st.markdown(render_score_ring(scores_in["humanness"],    "Humanness"),   unsafe_allow_html=True)
-        with r2: st.markdown(render_score_ring(scores_in["flesch"],       "Readability"), unsafe_allow_html=True)
-        with r3: st.markdown(render_score_ring(scores_in["ttr"],          "Lexical Div"), unsafe_allow_html=True)
-        with r4: st.markdown(render_score_ring(scores_in["sl_variation"], "Rhythm Var"),  unsafe_allow_html=True)
-        st.markdown(render_metrics(scores_in), unsafe_allow_html=True)
-    else:
-        scores_in = {}
-
-with col_out:
-    st.markdown('<div class="card-title">✨ Humanized Output</div>', unsafe_allow_html=True)
-
-    if "output_text" not in st.session_state:
-        st.session_state.output_text = ""
-    output_text = st.session_state.output_text
-
-    # ── Render output directly — no st.empty() to avoid key conflicts ──
-    if output_text.strip():
-        # Show as readable styled div + copyable text area
-        st.markdown(
-            f'''<div style="
-                background:white; border:1.5px solid #c9a84c; border-radius:10px;
-                padding:1.1rem 1.3rem; min-height:380px; max-height:420px;
-                overflow-y:auto; font-family:DM Sans,sans-serif; font-size:0.9rem;
-                line-height:1.7; color:#1a1a2e; white-space:pre-wrap;
-            ">{output_text}</div>''',
-            unsafe_allow_html=True,
+    with col_in:
+        st.markdown('<div class="card-title">📄 Input Text</div>', unsafe_allow_html=True)
+        input_text = st.text_area(
+            label="Input", height=380,
+            placeholder="Paste your AI-generated text here (5000+ words supported)…",
+            label_visibility="collapsed", key="input_text",
         )
-        scores_out = compute_scores(output_text)
-        wc_out = scores_out.get("word_count", 0)
-        sc_out = scores_out.get("sent_count", 0)
-        st.markdown(f'<span class="wc-badge">📝 {wc_out:,} words · {sc_out} sentences</span>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#1a1a2e;font-weight:600;margin-top:0.8rem;">After — Humanness Analysis</p>', unsafe_allow_html=True)
-        r1, r2, r3, r4 = st.columns(4)
-        with r1: st.markdown(render_score_ring(scores_out["humanness"],    "Humanness"),   unsafe_allow_html=True)
-        with r2: st.markdown(render_score_ring(scores_out["flesch"],       "Readability"), unsafe_allow_html=True)
-        with r3: st.markdown(render_score_ring(scores_out["ttr"],          "Lexical Div"), unsafe_allow_html=True)
-        with r4: st.markdown(render_score_ring(scores_out["sl_variation"], "Rhythm Var"),  unsafe_allow_html=True)
-        st.markdown(render_metrics(scores_out), unsafe_allow_html=True)
-    else:
-        # Empty state placeholder
-        st.markdown(
-            '''<div style="
-                background:white; border:1.5px dashed #d4c9b5; border-radius:10px;
-                min-height:380px; display:flex; align-items:center; justify-content:center;
-                flex-direction:column; gap:0.6rem; color:#9a8a7a;
-            ">
-              <div style="font-size:2rem;">✨</div>
-              <div style="font-size:0.9rem; font-family:DM Sans,sans-serif;">
-                Humanized text will appear here
-              </div>
-            </div>''',
-            unsafe_allow_html=True,
-        )
-        scores_out = {}
+        wc_in = len(input_text.split()) if input_text.strip() else 0
+        sc_in = len(re.split(r'[.!?]+', input_text)) if input_text.strip() else 0
+        st.markdown(f'<span class="wc-badge">📝 {wc_in:,} words · {sc_in} sentences</span>', unsafe_allow_html=True)
 
+        if input_text.strip():
+            scores_in = compute_scores(input_text)
+            st.markdown('<p style="color:#c9a84c;font-weight:700;margin-top:0.8rem;">Before — Humanness Analysis</p>', unsafe_allow_html=True)
+            r1, r2, r3, r4 = st.columns(4)
+            with r1: st.markdown(render_score_ring(scores_in["humanness"],    "Humanness"),   unsafe_allow_html=True)
+            with r2: st.markdown(render_score_ring(scores_in["flesch"],       "Readability"), unsafe_allow_html=True)
+            with r3: st.markdown(render_score_ring(scores_in["ttr"],          "Lexical Div"), unsafe_allow_html=True)
+            with r4: st.markdown(render_score_ring(scores_in["sl_variation"], "Rhythm Var"),  unsafe_allow_html=True)
+            st.markdown(render_metrics(scores_in), unsafe_allow_html=True)
+        else:
+            scores_in = {}
 
-# ── ACTION ROW ─────────────────────────────────────────────────────────────
+    with col_out:
+        st.markdown('<div class="card-title">✨ Humanized Output</div>', unsafe_allow_html=True)
+        output_text = st.session_state.output_text
 
-st.markdown("<br>", unsafe_allow_html=True)
-btn_col, info_col = st.columns([2, 3])
+        if output_text.strip():
+            st.markdown(
+                f'''<div style="background:white;border:1.5px solid #c9a84c;border-radius:10px;
+                    padding:1.1rem 1.3rem;min-height:340px;max-height:400px;overflow-y:auto;
+                    font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;
+                    color:#1a1a2e;white-space:pre-wrap;">{output_text}</div>''',
+                unsafe_allow_html=True,
+            )
+            # ── Copy button (JS clipboard) ─────────────────────────────
+            copy_id = "humanizer-out"
+            st.markdown(f'''
+            <div style="margin-top:0.5rem;display:flex;gap:0.6rem;align-items:center;">
+              <textarea id="{copy_id}" style="position:absolute;left:-9999px;">{output_text}</textarea>
+              <button onclick="navigator.clipboard.writeText(document.getElementById(\'{copy_id}\').value).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy Text',2000)}})"
+                style="background:#1a1a2e;color:#c9a84c;border:1.5px solid #c9a84c;border-radius:8px;
+                       padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;font-family:DM Sans,sans-serif;">
+                📋 Copy Text
+              </button>
+            </div>''', unsafe_allow_html=True)
 
-with btn_col:
-    run_btn = st.button(
-        "✦ Humanize Text", type="primary",
-        use_container_width=True,
-        disabled=(not input_text.strip()),
-    )
+            scores_out = compute_scores(output_text)
+            wc_out = scores_out.get("word_count", 0)
+            sc_out = scores_out.get("sent_count", 0)
+            st.markdown(f'<span class="wc-badge">📝 {wc_out:,} words · {sc_out} sentences</span>', unsafe_allow_html=True)
+            st.markdown('<p style="color:#c9a84c;font-weight:700;margin-top:0.8rem;">After — Humanness Analysis</p>', unsafe_allow_html=True)
+            r1, r2, r3, r4 = st.columns(4)
+            with r1: st.markdown(render_score_ring(scores_out["humanness"],    "Humanness"),   unsafe_allow_html=True)
+            with r2: st.markdown(render_score_ring(scores_out["flesch"],       "Readability"), unsafe_allow_html=True)
+            with r3: st.markdown(render_score_ring(scores_out["ttr"],          "Lexical Div"), unsafe_allow_html=True)
+            with r4: st.markdown(render_score_ring(scores_out["sl_variation"], "Rhythm Var"),  unsafe_allow_html=True)
+            st.markdown(render_metrics(scores_out), unsafe_allow_html=True)
+        else:
+            st.markdown(
+                '''<div style="background:white;border:1.5px dashed #d4c9b5;border-radius:10px;
+                    min-height:380px;display:flex;align-items:center;justify-content:center;
+                    flex-direction:column;gap:0.6rem;color:#9a8a7a;">
+                  <div style="font-size:2rem;">✨</div>
+                  <div style="font-size:0.9rem;font-family:DM Sans,sans-serif;">Humanized text will appear here</div>
+                </div>''',
+                unsafe_allow_html=True,
+            )
+            scores_out = {}
 
-with info_col:
-    if not input_text.strip():
-        st.info("📄 Paste your text in the input panel above.")
-    elif backend == "⚡ Groq (Cloud Free)" and not groq_key:
-        st.warning("🔑 Enter your Groq API key in the sidebar. Free at console.groq.com")
-    else:
-        chunks = chunk_text(input_text)
-        icon = "🦙" if "Ollama" in backend else "⚡"
-        st.markdown(
-            f'<div class="wc-badge">{icon} {len(chunks)} chunk{"s" if len(chunks)>1 else ""} '
-            f'· {model_choice.split(":")[0]} · {intensity}</div>',
-            unsafe_allow_html=True,
-        )
+    # Action row
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_col, info_col = st.columns([2, 3])
+    with btn_col:
+        run_btn = st.button("✦ Humanize Text", type="primary", use_container_width=True, disabled=(not input_text.strip()))
+    with info_col:
+        if not input_text.strip():
+            st.info("📄 Paste your text in the input panel above.")
+        elif backend == "⚡ Groq (Cloud Free)" and not groq_key:
+            st.warning("🔑 Enter your Groq API key in the sidebar. Free at console.groq.com")
+        else:
+            chunks = chunk_text(input_text)
+            icon = "🦙" if "Ollama" in backend else "⚡"
+            st.markdown(
+                f'<div class="wc-badge">{icon} {len(chunks)} chunk{"s" if len(chunks)>1 else ""} '
+                f'· {model_choice.split(":")[0]} · {intensity}</div>',
+                unsafe_allow_html=True,
+            )
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 2 — PARAPHRASER
+# ══════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.markdown('<div class="card-title">🔄 Paraphraser</div>', unsafe_allow_html=True)
+
+    p_col1, p_col2 = st.columns([1, 1], gap="large")
+
+    with p_col1:
+        st.markdown('<p style="color:#c9a84c;font-weight:700;">Input Text</p>', unsafe_allow_html=True)
+        para_input = st.text_area("Para input", height=320,
+            placeholder="Paste text to paraphrase…",
+            label_visibility="collapsed", key="para_input")
+
+        p_mode_col, p_btn_col = st.columns([2, 1])
+        with p_mode_col:
+            para_mode = st.selectbox("Mode", list(PARAPHRASE_MODES.keys()),
+                                     label_visibility="collapsed", key="para_mode")
+        with p_btn_col:
+            para_btn = st.button("🔄 Paraphrase", type="primary",
+                                 use_container_width=True,
+                                 disabled=(not para_input.strip()))
+
+        if para_input.strip():
+            wc_p = len(para_input.split())
+            st.markdown(f'<span class="wc-badge">📝 {wc_p:,} words</span>', unsafe_allow_html=True)
+
+    with p_col2:
+        st.markdown('<p style="color:#c9a84c;font-weight:700;">Paraphrased Output</p>', unsafe_allow_html=True)
+        para_out = st.session_state.paraphrase_out
+
+        if para_out.strip():
+            st.markdown(
+                f'''<div style="background:white;border:1.5px solid #c9a84c;border-radius:10px;
+                    padding:1.1rem 1.3rem;min-height:320px;max-height:380px;overflow-y:auto;
+                    font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;
+                    color:#1a1a2e;white-space:pre-wrap;">{para_out}</div>''',
+                unsafe_allow_html=True,
+            )
+            copy_id_p = "para-out"
+            st.markdown(f'''
+            <div style="margin-top:0.5rem;">
+              <textarea id="{copy_id_p}" style="position:absolute;left:-9999px;">{para_out}</textarea>
+              <button onclick="navigator.clipboard.writeText(document.getElementById(\'{copy_id_p}\').value).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy',2000)}})"
+                style="background:#1a1a2e;color:#c9a84c;border:1.5px solid #c9a84c;border-radius:8px;
+                       padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;font-family:DM Sans,sans-serif;">
+                📋 Copy
+              </button>
+            </div>''', unsafe_allow_html=True)
+            wc_po = len(para_out.split())
+            st.markdown(f'<span class="wc-badge">📝 {wc_po:,} words</span>', unsafe_allow_html=True)
+        else:
+            st.markdown(
+                '''<div style="background:white;border:1.5px dashed #d4c9b5;border-radius:10px;
+                    min-height:320px;display:flex;align-items:center;justify-content:center;
+                    flex-direction:column;gap:0.5rem;color:#9a8a7a;">
+                  <div style="font-size:2rem;">🔄</div>
+                  <div style="font-size:0.9rem;">Paraphrased text will appear here</div>
+                </div>''', unsafe_allow_html=True)
+
+    # Paraphrase processing
+    if para_btn:
+        if backend == "⚡ Groq (Cloud Free)" and not groq_key:
+            st.error("🔑 Enter your Groq API key in the sidebar.")
+        else:
+            use_groq_p = (backend == "⚡ Groq (Cloud Free)")
+            with st.spinner(f"Paraphrasing in {para_mode} mode…"):
+                try:
+                    result = paraphrase_text(use_groq_p, ollama_url, groq_key, model_choice, para_input, para_mode)
+                    st.session_state.paraphrase_out = result
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ {str(e)}")
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 3 — GRAMMAR CHECKER
+# ══════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.markdown('<div class="card-title">✅ Grammar & Style Checker</div>', unsafe_allow_html=True)
+
+    g_col1, g_col2 = st.columns([1, 1], gap="large")
+
+    with g_col1:
+        st.markdown('<p style="color:#c9a84c;font-weight:700;">Input Text</p>', unsafe_allow_html=True)
+        gram_input = st.text_area("Grammar input", height=320,
+            placeholder="Paste text to check for grammar, spelling, and style…",
+            label_visibility="collapsed", key="gram_input")
+        gram_btn = st.button("✅ Check Grammar", type="primary",
+                             use_container_width=True,
+                             disabled=(not gram_input.strip()))
+        if gram_input.strip():
+            wc_g = len(gram_input.split())
+            st.markdown(f'<span class="wc-badge">📝 {wc_g:,} words</span>', unsafe_allow_html=True)
+
+    with g_col2:
+        st.markdown('<p style="color:#c9a84c;font-weight:700;">Corrected Text</p>', unsafe_allow_html=True)
+        gram_corrected = st.session_state.grammar_corrected
+
+        if gram_corrected.strip():
+            st.markdown(
+                f'''<div style="background:white;border:1.5px solid #4a7c59;border-radius:10px;
+                    padding:1.1rem 1.3rem;min-height:200px;max-height:280px;overflow-y:auto;
+                    font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;
+                    color:#1a1a2e;white-space:pre-wrap;">{gram_corrected}</div>''',
+                unsafe_allow_html=True,
+            )
+            copy_id_g = "gram-out"
+            st.markdown(f'''
+            <div style="margin-top:0.5rem;">
+              <textarea id="{copy_id_g}" style="position:absolute;left:-9999px;">{gram_corrected}</textarea>
+              <button onclick="navigator.clipboard.writeText(document.getElementById(\'{copy_id_g}\').value).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy Corrected',2000)}})"
+                style="background:#1a3a2e;color:#6fcf97;border:1.5px solid #4a7c59;border-radius:8px;
+                       padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;font-family:DM Sans,sans-serif;">
+                📋 Copy Corrected
+              </button>
+            </div>''', unsafe_allow_html=True)
+
+            # Issues table
+            issues = st.session_state.grammar_issues
+            if issues:
+                st.markdown(f'<p style="color:#c9a84c;font-weight:700;margin-top:1rem;">⚠️ {len(issues)} Issue(s) Found</p>', unsafe_allow_html=True)
+                type_colors = {
+                    "grammar":     "#e87a7a", "spelling":  "#e8a87a",
+                    "punctuation": "#e8d47a", "style":     "#a8d47a",
+                    "wordiness":   "#7ab8e8", "clarity":   "#b87ae8",
+                }
+                for iss in issues:
+                    t = iss.get("type","other")
+                    tc = type_colors.get(t, "#aaa")
+                    orig = iss.get("original","")
+                    corr = iss.get("corrected","")
+                    expl = iss.get("explanation","")
+                    st.markdown(f'''
+                    <div style="background:white;border-left:4px solid {tc};border-radius:0 8px 8px 0;
+                         padding:0.7rem 1rem;margin-bottom:0.5rem;">
+                      <div style="display:flex;gap:0.8rem;align-items:center;margin-bottom:0.3rem;">
+                        <span style="background:{tc}22;color:{tc};border-radius:4px;padding:0.1rem 0.5rem;
+                               font-size:0.7rem;font-weight:700;text-transform:uppercase;">{t}</span>
+                      </div>
+                      <div style="font-size:0.82rem;color:#5a6a7a;">
+                        <span style="color:#e87a7a;text-decoration:line-through;">{orig}</span>
+                        <span style="color:#1a1a2e;margin:0 0.4rem;">→</span>
+                        <span style="color:#4a7c59;font-weight:600;">{corr}</span>
+                      </div>
+                      <div style="font-size:0.78rem;color:#7a8a9a;margin-top:0.3rem;">{expl}</div>
+                    </div>''', unsafe_allow_html=True)
+            else:
+                st.markdown('<p style="color:#6fcf97;font-weight:600;margin-top:0.8rem;">✅ No issues found — text looks great!</p>', unsafe_allow_html=True)
+        else:
+            st.markdown(
+                '''<div style="background:white;border:1.5px dashed #d4c9b5;border-radius:10px;
+                    min-height:320px;display:flex;align-items:center;justify-content:center;
+                    flex-direction:column;gap:0.5rem;color:#9a8a7a;">
+                  <div style="font-size:2rem;">✅</div>
+                  <div style="font-size:0.9rem;">Grammar report will appear here</div>
+                </div>''', unsafe_allow_html=True)
+
+    # Grammar processing
+    if gram_btn:
+        if backend == "⚡ Groq (Cloud Free)" and not groq_key:
+            st.error("🔑 Enter your Groq API key in the sidebar.")
+        else:
+            use_groq_g = (backend == "⚡ Groq (Cloud Free)")
+            with st.spinner("Checking grammar and style…"):
+                try:
+                    result = grammar_check(use_groq_g, ollama_url, groq_key, model_choice, gram_input)
+                    st.session_state.grammar_corrected = result.get("corrected", "")
+                    st.session_state.grammar_issues    = result.get("issues", [])
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ {str(e)}")
 
 
 # ── PROCESSING LOGIC ───────────────────────────────────────────────────────
