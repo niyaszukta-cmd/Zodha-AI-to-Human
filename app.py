@@ -17,11 +17,9 @@ from collections import Counter
 # ══════════════════════════════════════════════════════════════════════════════
 
 PLANS = {
-    "free":    {"label": "Free",       "daily_words": 2_000,  "price": "$0",    "color": "#9a8a7a"},
-    "starter": {"label": "Starter",    "daily_words": 20_000, "price": "$9/mo", "color": "#c9a84c"},
-    "pro":     {"label": "Pro",        "daily_words": 80_000, "price": "$29/mo","color": "#6fcf97"},
-    "unlimited":{"label": "Unlimited", "daily_words": 999_999,"price": "$79/mo","color": "#b87ae8"},
+    "personal": {"label": "Personal", "daily_words": 999_999, "price": "Private", "color": "#c9a84c"},
 }
+# Single-user private app — no plan tiers, no registration
 
 GROQ_MODELS = {
     "llama-3.3-70b-versatile": "Llama 3.3 70B · Best quality",
@@ -80,43 +78,24 @@ def _hash_pw(password: str) -> str:
     return hashlib.sha256((SECRET_KEY + password).encode()).hexdigest()
 
 def _ensure_demo_users(conn):
-    users = [
-        # email,                   password,     name,         plan,        is_admin
-        ("admin@humanizeai.com",  "admin123",   "admin",      "unlimited", 1),
-        ("demo@humanizeai.com",   "demo1234",   "Demo User",  "pro",       0),
-        ("free@humanizeai.com",   "free1234",   "Free User",  "free",      0),
-    ]
-    for email, pw, name, plan, is_admin in users:
-        existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-        if not existing:
-            conn.execute(
-                "INSERT INTO users (email,password_hash,name,plan,is_admin) VALUES (?,?,?,?,?)",
-                (email, _hash_pw(pw), name, plan, is_admin)
-            )
-        else:
-            # Update name to lowercase so LOWER() match works for existing DBs
-            conn.execute(
-                "UPDATE users SET name=LOWER(name) WHERE email=? AND is_admin=1",
-                (email,)
-            )
+    # Single owner account — change these credentials before deploying
+    owner = ("nyztrade@humanizeai.com", "nyztrade2026", "nyztrade", "personal", 1)
+    email, pw, name, plan, is_admin = owner
+    existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
+    if not existing:
+        conn.execute(
+            "INSERT INTO users (email,password_hash,name,plan,is_admin) VALUES (?,?,?,?,?)",
+            (email, _hash_pw(pw), name, plan, is_admin)
+        )
+    else:
+        # Keep name lowercase for case-insensitive login
+        conn.execute("UPDATE users SET name=LOWER(name) WHERE email=? AND is_admin=1", (email,))
+        # Ensure plan is always personal (unlimited)
+        conn.execute("UPDATE users SET plan='personal' WHERE email=?", (email,))
     conn.commit()
 
-def register_user(email: str, password: str, name: str) -> tuple:
-    conn = get_db()
-    try:
-        existing = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-        if existing:
-            return False, "Email already registered."
-        conn.execute(
-            "INSERT INTO users (email,password_hash,name,plan) VALUES (?,?,?,?)",
-            (email, _hash_pw(password), name, "free")
-        )
-        conn.commit()
-        return True, "Account created! Please log in."
-    except Exception as e:
-        return False, str(e)
-    finally:
-        conn.close()
+# Registration disabled — single-user private app
+# To change credentials, update _ensure_demo_users() above
 
 def login_user(email: str, password: str) -> tuple:
     conn = get_db()
@@ -173,11 +152,10 @@ def log_usage(user_id: int, tool: str, words_in: int, words_out: int, model: str
 
 def check_quota(user_id: int, plan: str, words_needed: int) -> tuple:
     usage  = get_today_usage(user_id)
-    limit  = PLANS[plan]["daily_words"]
+    limit  = PLANS.get(plan, PLANS["personal"])["daily_words"]
     used   = usage["total"]
-    remaining = limit - used
-    if words_needed > remaining:
-        return False, used, limit, remaining
+    remaining = max(0, limit - used)
+    # Always allow — single personal user has unlimited words
     return True, used, limit, remaining
 
 # ── ADMIN DB FUNCTIONS ─────────────────────────────────────────────────────
@@ -869,14 +847,9 @@ if st.session_state.app_mode == "admin":
                     </div>""", unsafe_allow_html=True)
                 with action_col:
                     st.markdown(f'<span class="plan-badge" style="background:{plan_c}22;color:{plan_c};border:1px solid {plan_c}44;">{u["plan"].upper()}</span>', unsafe_allow_html=True)
-                    new_plan = st.selectbox("Change Plan", list(PLANS.keys()),
-                                           index=list(PLANS.keys()).index(u["plan"]),
-                                           key=f"plan_{u['id']}")
-                    if new_plan != u["plan"]:
-                        if st.button(f"✅ Apply Plan", key=f"apply_{u['id']}"):
-                            admin_update_user_plan(u["id"], new_plan)
-                            st.success(f"Plan updated to {new_plan}")
-                            st.rerun()
+                    new_plan = "personal"  # Single plan only
+                    st.markdown('<span style="color:#c9a84c;font-size:0.82rem;">Personal (Unlimited)</span>', unsafe_allow_html=True)
+
                     if not u["is_admin"]:
                         c1,c2 = st.columns(2)
                         with c1:
@@ -1002,68 +975,60 @@ if st.session_state.app_mode == "admin":
 
     st.stop()
 
-# ── USER AUTH GATE ────────────────────────────────────────────────────────────
+# ── USER LOGIN GATE (single user) ────────────────────────────────────────────
 if not st.session_state.user:
+    # Centered login page
     st.markdown("""
-    <div style="text-align:center;padding:2rem 0 1rem;">
-      <div style="font-family:'Playfair Display',serif;font-size:3rem;font-weight:900;color:#c9a84c;">HumanizeAI</div>
-      <div style="color:#5a6a7a;font-size:1rem;margin-top:0.3rem;">by NYZTrade Analytics · Text Intelligence Suite</div>
+    <div style="text-align:center;padding:3rem 0 1.5rem;">
+      <div style="font-family:'Playfair Display',serif;font-size:3.2rem;font-weight:900;
+                  color:#c9a84c;letter-spacing:-1px;">HumanizeAI</div>
+      <div style="color:#5a6a7a;font-size:0.95rem;margin-top:0.4rem;">
+        by NYZTrade Analytics · Private Access
+      </div>
     </div>""", unsafe_allow_html=True)
 
-    col_auth, _, col_plans = st.columns([1.2, 0.2, 1])
-
-    with col_auth:
-        tab_login, tab_reg = st.tabs(["🔑 Sign In", "✨ Create Account"])
-
-        with tab_login:
-            st.markdown("##### Welcome back")
-            email_l    = st.text_input("Email",    key="l_email",    placeholder="you@example.com")
-            password_l = st.text_input("Password", key="l_password", type="password", placeholder="••••••••")
-            if st.button("Sign In", type="primary", use_container_width=True, key="do_login"):
-                if email_l and password_l:
-                    user, err = login_user(email_l, password_l)
-                    if user:
-                        st.session_state.user = user
+    _, center_col, _ = st.columns([1, 1, 1])
+    with center_col:
+        with st.container(border=True):
+            st.markdown(
+                '<p style="font-family:Playfair Display,serif;font-size:1.15rem;'
+                'font-weight:700;color:#1a1a2e;margin-bottom:0.2rem;">Welcome back</p>',
+                unsafe_allow_html=True
+            )
+            st.markdown(
+                '<p style="font-size:0.82rem;color:#9a8a7a;margin-bottom:1rem;">'
+                'Private access only</p>',
+                unsafe_allow_html=True
+            )
+            login_id   = st.text_input("Username or Email", key="l_email",
+                                        placeholder="username or email")
+            password_l = st.text_input("Password", key="l_password",
+                                        type="password", placeholder="••••••••")
+            if st.button("🔑 Sign In", type="primary",
+                         use_container_width=True, key="do_login"):
+                if login_id and password_l:
+                    # Case-insensitive match on email OR name
+                    conn = get_db()
+                    row = conn.execute(
+                        "SELECT * FROM users WHERE "
+                        "(LOWER(email)=LOWER(?) OR LOWER(name)=LOWER(?)) "
+                        "AND password_hash=?",
+                        (login_id, login_id, _hash_pw(password_l))
+                    ).fetchone()
+                    conn.close()
+                    if row:
+                        st.session_state.user = dict(row)
                         st.rerun()
                     else:
-                        st.error(f"❌ {err}")
+                        st.error("❌ Invalid credentials.")
                 else:
-                    st.warning("Please fill in all fields.")
+                    st.warning("Please fill in both fields.")
 
-        with tab_reg:
-            st.markdown("##### Create your account")
-            name_r     = st.text_input("Full Name",key="r_name",    placeholder="Dr. Niyas N")
-            email_r    = st.text_input("Email",    key="r_email",   placeholder="you@example.com")
-            password_r = st.text_input("Password", key="r_password",type="password",placeholder="Min 6 characters")
-            if st.button("Create Account", type="primary", use_container_width=True, key="do_register"):
-                if name_r and email_r and password_r:
-                    if len(password_r) < 6:
-                        st.warning("Password must be at least 6 characters.")
-                    else:
-                        ok, msg = register_user(email_r, password_r, name_r)
-                        if ok: st.success(f"✅ {msg}")
-                        else:  st.error(f"❌ {msg}")
-                else:
-                    st.warning("Please fill in all fields.")
-
-    with col_plans:
-        st.markdown("#### 📋 Plans")
-        for plan_id, plan in PLANS.items():
-            st.markdown(f"""
-            <div style="background:white;border:1px solid {'#c9a84c' if plan_id=='pro' else '#d4c9b5'};
-                 border-radius:12px;padding:0.9rem 1.1rem;margin-bottom:0.6rem;">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-weight:700;color:#1a1a2e;">{plan['label']}</span>
-                <span style="font-weight:700;color:{plan['color']};">{plan['price']}</span>
-              </div>
-              <div style="font-size:0.82rem;color:#5a6a7a;margin-top:0.3rem;">
-                {plan['daily_words']:,} words / day
-              </div>
-            </div>""", unsafe_allow_html=True)
-
-        # Admin portal link at bottom
-        st.markdown("---")
-        if st.button("🛡️ Admin Portal", use_container_width=True, key="goto_admin"):
+    # Admin portal — subtle link at bottom
+    st.markdown("<br>", unsafe_allow_html=True)
+    _, ac, _ = st.columns([2, 1, 2])
+    with ac:
+        if st.button("🛡️ Admin", use_container_width=True, key="goto_admin"):
             st.session_state.app_mode = "admin"
             st.rerun()
 
@@ -1083,29 +1048,15 @@ bar_color = "#6fcf97" if pct<70 else "#e8c97a" if pct<90 else "#e87a7a"
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────
 with st.sidebar:
-    # User info
+    # User info — clean, no plan clutter
     st.markdown(f"""
-    <div style="padding:0.8rem;background:rgba(255,255,255,0.06);border-radius:10px;margin-bottom:0.8rem;">
-      <div style="font-family:'Playfair Display',serif;font-size:1rem;color:white;font-weight:700;">
-        👤 {user['name']}</div>
-      <div style="font-size:0.75rem;color:rgba(255,255,255,0.5);margin-top:0.2rem;">{user['email']}</div>
-      <div style="margin-top:0.5rem;">
-        <span class="plan-badge" style="background:{plan_info['color']}22;color:{plan_info['color']};border:1px solid {plan_info['color']}44;">
-          {plan_info['label']} Plan
-        </span>
+    <div style="padding:0.8rem;background:rgba(255,255,255,0.06);border-radius:10px;margin-bottom:0.8rem;
+                border:1px solid rgba(201,168,76,0.2);">
+      <div style="font-family:'Playfair Display',serif;font-size:1rem;color:#c9a84c;font-weight:700;">
+        ✍️ {user['name']}</div>
+      <div style="font-size:0.72rem;color:rgba(255,255,255,0.4);margin-top:0.3rem;">
+        Words today: <b style="color:rgba(255,255,255,0.7);">{used_words:,}</b>
       </div>
-    </div>""", unsafe_allow_html=True)
-
-    # Quota bar
-    st.markdown(f"""
-    <div style="font-size:0.75rem;color:rgba(255,255,255,0.5);margin-bottom:0.2rem;">
-      Today's usage: <b style="color:white;">{used_words:,}</b> / {limit:,} words
-    </div>
-    <div class="quota-bar-bg">
-      <div class="quota-bar-fill" style="width:{pct}%;background:{bar_color};"></div>
-    </div>
-    <div style="font-size:0.7rem;color:rgba(255,255,255,0.4);margin-bottom:0.8rem;">
-      {max(0,limit-used_words):,} words remaining today
     </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
@@ -1160,9 +1111,9 @@ with st.sidebar:
 # ── HERO ───────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="hero-banner">
-  <div class="hero-badge">v5.3 · Production</div>
+  <div class="hero-badge">v5.3 · NYZTrade</div>
   <div class="hero-title">HumanizeAI</div>
-  <div class="hero-sub">Welcome back, {user['name']} · {plan_info['label']} Plan · {max(0,limit-used_words):,} words remaining today</div>
+  <div class="hero-sub">Welcome back, {user['name']} · Humanizer · Paraphraser · Grammar Checker · {used_words:,} words processed today</div>
 </div>""", unsafe_allow_html=True)
 
 # ── TABS ───────────────────────────────────────────────────────────────────
@@ -1257,13 +1208,9 @@ style="background:#1a3a2e;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
             st.info("📄 Paste text above to begin.")
         else:
             chunks = chunk_text(input_text)
-            ok, used, lim, rem = check_quota(user["id"], plan, wc_in)
-            if not ok:
-                st.error(f"📊 Daily limit reached ({lim:,} words). Resets midnight UTC.")
-            else:
-                st.markdown(
-                    f'<div class="wc-badge">⚡ {len(chunks)} chunk(s) · {model_choice.split(":")[0]} · {intensity} · {rem:,} words remaining</div>',
-                    unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="wc-badge">⚡ {len(chunks)} chunk(s) · {model_choice.split(":")[0]} · {intensity}</div>',
+                unsafe_allow_html=True)
 
     # ── PROCESSING ────────────────────────────────────────────────────────
     if run_btn:
@@ -1272,45 +1219,39 @@ style="background:#1a3a2e;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
         elif not input_text.strip():
             st.error("Please enter text.")
         else:
-            ok, used, lim, rem = check_quota(user["id"], plan, wc_in)
-            if not ok:
-                st.error(f"❌ Daily word limit reached ({used:,}/{lim:,}). Upgrade your plan or wait until midnight UTC.")
-            else:
-                try:
-                    chunks  = chunk_text(input_text)
-                    n       = len(chunks)
-                    results = []
-                    progress_bar = st.progress(0, text="Starting stream…")
+            try:
+                chunks  = chunk_text(input_text)
+                n       = len(chunks)
+                results = []
+                progress_bar = st.progress(0, text="Starting stream…")
 
-                    for i, chunk in enumerate(chunks):
-                        progress_bar.progress(i/n, text=f"⚡ Streaming chunk {i+1}/{n}…")
-                        if n > 1:
-                            # For multi-chunk, stream each into a temp placeholder
-                            temp_ph = st.empty()
-                            text_out = humanize_streaming(groq_key, model_choice, chunk, style, intensity, temp_ph)
-                            temp_ph.empty()
-                        else:
-                            # Single chunk — stream directly into main placeholder
-                            text_out = humanize_streaming(groq_key, model_choice, chunk, style, intensity, stream_placeholder)
-                        results.append(text_out)
-
-                    progress_bar.progress(1.0, text="✅ Complete!")
-                    full_output = "\n\n".join(results)
-                    wc_out_log  = len(full_output.split())
-                    log_usage(user["id"], "humanizer", wc_in, wc_out_log, model_choice)
-                    st.session_state.output_text = full_output
-                    time.sleep(0.5)
-                    st.rerun()
-
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        st.error("⚠️ Groq rate limit hit. Wait 1 minute and try again.")
-                    elif e.response.status_code == 401:
-                        st.error("❌ Invalid Groq API key.")
+                for i, chunk in enumerate(chunks):
+                    progress_bar.progress(i/n, text=f"⚡ Streaming chunk {i+1}/{n}…")
+                    if n > 1:
+                        temp_ph = st.empty()
+                        text_out = humanize_streaming(groq_key, model_choice, chunk, style, intensity, temp_ph)
+                        temp_ph.empty()
                     else:
-                        st.error(f"❌ HTTP Error: {e}")
-                except Exception as e:
-                    st.error(f"❌ {str(e)}")
+                        text_out = humanize_streaming(groq_key, model_choice, chunk, style, intensity, stream_placeholder)
+                    results.append(text_out)
+
+                progress_bar.progress(1.0, text="✅ Complete!")
+                full_output = "\n\n".join(results)
+                wc_out_log  = len(full_output.split())
+                log_usage(user["id"], "humanizer", wc_in, wc_out_log, model_choice)
+                st.session_state.output_text = full_output
+                time.sleep(0.5)
+                st.rerun()
+
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    st.error("⚠️ Groq rate limit hit. Wait 1 minute and try again.")
+                elif e.response.status_code == 401:
+                    st.error("❌ Invalid Groq API key.")
+                else:
+                    st.error(f"❌ HTTP Error: {e}")
+            except Exception as e:
+                st.error(f"❌ {str(e)}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — PARAPHRASER
@@ -1345,10 +1286,7 @@ with tab2:
         if not groq_key: st.error("🔑 Add Groq API key in sidebar.")
         else:
             wc_p = len(para_input.split())
-            ok,_,_,_ = check_quota(user["id"],plan,wc_p)
-            if not ok: st.error("❌ Daily word limit reached.")
-            else:
-                with st.spinner(f"Paraphrasing ({para_mode})…"):
+            with st.spinner(f"Paraphrasing ({para_mode})…"):
                     try:
                         result = paraphrase_text(groq_key,model_choice,para_input,para_mode)
                         log_usage(user["id"],"paraphraser",wc_p,len(result.split()),model_choice)
@@ -1408,10 +1346,7 @@ with tab3:
         if not groq_key: st.error("🔑 Add Groq API key in sidebar.")
         else:
             wc_g = len(gram_input.split())
-            ok,_,_,_ = check_quota(user["id"],plan,wc_g)
-            if not ok: st.error("❌ Daily word limit reached.")
-            else:
-                with st.spinner("Checking grammar…"):
+            with st.spinner("Checking grammar…"):
                     try:
                         result=grammar_check(groq_key,model_choice,gram_input)
                         log_usage(user["id"],"grammar",wc_g,len(result.get("corrected","").split()),model_choice)
