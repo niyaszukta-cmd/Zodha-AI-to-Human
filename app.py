@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import re
 import time
@@ -310,42 +311,37 @@ div[data-testid="stAlert"] p { color: #1a1a2e !important; }
 # ── SCORING ENGINE ─────────────────────────────────────────────────────────
 
 def make_copy_btn(copy_id: str, text: str, label: str = "📋 Copy",
-                  color: str = "#c9a84c", bg: str = "#1a1a2e", border: str = "#c9a84c") -> str:
-    """Copy button that reads from a hidden textarea — no JS string escaping needed."""
+                  color: str = "#c9a84c", bg: str = "#1a1a2e", border: str = "#c9a84c") -> None:
+    """Render a self-contained copy button via st.components — works inside Streamlit iframes."""
     import html as _html
-    # Store text safely in a hidden textarea — HTML entities handle all special chars
-    safe_html = _html.escape(text, quote=True)
-    return f'''<div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;">
-  <textarea id="txt-{copy_id}" readonly style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;">{safe_html}</textarea>
-  <button id="btn-{copy_id}"
-    onclick="(function(){{
-      var el = document.getElementById('txt-{copy_id}');
-      var txt = el.value;
-      if(navigator.clipboard && window.isSecureContext){{
-        navigator.clipboard.writeText(txt).then(function(){{
-          var b = document.getElementById('btn-{copy_id}');
-          b.innerHTML = '✅ Copied!';
-          setTimeout(function(){{ b.innerHTML = '{label}'; }}, 2000);
-        }}).catch(function(){{
-          el.select(); document.execCommand('copy');
-          var b = document.getElementById('btn-{copy_id}');
-          b.innerHTML = '✅ Copied!';
-          setTimeout(function(){{ b.innerHTML = '{label}'; }}, 2000);
-        }});
-      }} else {{
-        el.select(); el.setSelectionRange(0, 99999);
-        try{{ document.execCommand('copy'); }}catch(e){{}}
-        var b = document.getElementById('btn-{copy_id}');
-        b.innerHTML = '✅ Copied!';
-        setTimeout(function(){{ b.innerHTML = '{label}'; }}, 2000);
-      }}
-    }})();"
-    style="background:{bg};color:{color};border:1.5px solid {border};border-radius:8px;
-           padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;
-           font-family:'DM Sans',sans-serif;font-weight:500;transition:all 0.2s;">
-    {label}
-  </button>
-</div>'''
+    safe = _html.escape(text, quote=True)
+    # This component renders in its OWN iframe so document.getElementById works perfectly.
+    # The textarea lives in the same document as the button.
+    html_src = f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:transparent;">
+<textarea id="cp" readonly style="position:absolute;left:-9999px;top:0;width:1px;height:1px;">{safe}</textarea>
+<button id="btn"
+  onclick="var el=document.getElementById('cp');
+           el.select();el.setSelectionRange(0,99999);
+           var ok=false;
+           try{{ok=document.execCommand('copy');}}catch(e){{}}
+           if(!ok && navigator.clipboard){{
+             navigator.clipboard.writeText(el.value).then(function(){{
+               document.getElementById('btn').innerHTML='✅ Copied!';
+               setTimeout(function(){{document.getElementById('btn').innerHTML='{label}';}},2000);
+             }});
+           }} else {{
+             document.getElementById('btn').innerHTML='✅ Copied!';
+             setTimeout(function(){{document.getElementById('btn').innerHTML='{label}';}},2000);
+           }}"
+  style="background:{bg};color:{color};border:1.5px solid {border};
+         border-radius:8px;padding:0.4rem 1.1rem;cursor:pointer;
+         font-size:0.82rem;font-family:'DM Sans',sans-serif;
+         font-weight:500;transition:all 0.2s;white-space:nowrap;">
+  {label}
+</button>
+</body></html>"""
+    components.html(html_src, height=46, scrolling=False)
 
 
 def compute_scores(text: str) -> dict:
@@ -874,7 +870,7 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v4.3 · Full Suite</div>
+  <div class="hero-badge">v4.4 · Full Suite</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Ollama & Groq · 8-dimension scoring</div>
 </div>
@@ -975,9 +971,8 @@ with tab1:
                 f'<div class="output-box">{_safe_out}</div>',
                 unsafe_allow_html=True,
             )
-            # ── Copy button (robust fallback) ──────────────────────────
-            _copy_html1 = make_copy_btn("humanizer-out", output_text, "📋 Copy Text")
-            st.markdown(_copy_html1, unsafe_allow_html=True)
+            # ── Copy button ────────────────────────────────────────────
+            make_copy_btn("humanizer-out", output_text, "📋 Copy Text")
 
             scores_out = compute_scores(output_text)
             wc_out = scores_out.get("word_count", 0)
@@ -1059,8 +1054,7 @@ with tab2:
                 f'<div class="output-box-para">{_safe_para}</div>',
                 unsafe_allow_html=True,
             )
-            _copy_html2 = make_copy_btn("para-out", para_out, "📋 Copy")
-            st.markdown(_copy_html2, unsafe_allow_html=True)
+            make_copy_btn("para-out", para_out, "📋 Copy")
             wc_po = len(para_out.split())
             st.markdown(f'<span class="wc-badge">📝 {wc_po:,} words</span>', unsafe_allow_html=True)
         else:
@@ -1117,8 +1111,7 @@ with tab3:
                 f'<div style="background:white;border:1.5px solid #4a7c59;border-radius:10px;padding:1.1rem 1.3rem;height:260px;overflow-y:auto;font-family:DM Sans,sans-serif;font-size:0.9rem;line-height:1.7;color:#1a1a2e;white-space:pre-wrap;word-break:break-word;">{_safe_gram}</div>',
                 unsafe_allow_html=True,
             )
-            _copy_html3 = make_copy_btn("gram-out", gram_corrected, "📋 Copy Corrected", "#6fcf97", "#1a3a2e", "#4a7c59")
-            st.markdown(_copy_html3, unsafe_allow_html=True)
+            make_copy_btn("gram-out", gram_corrected, "📋 Copy Corrected", "#6fcf97", "#1a3a2e", "#4a7c59")
 
             # Issues table
             issues = st.session_state.grammar_issues
