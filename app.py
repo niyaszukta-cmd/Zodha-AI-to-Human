@@ -70,7 +70,10 @@ def init_db():
         );
     """)
     conn.commit()
-    # Create demo admin if not exists
+    # Migrate all existing users to "personal" plan (handles old plan names)
+    conn.execute("UPDATE users SET plan='personal' WHERE plan != 'personal'")
+    conn.commit()
+    # Create owner account if not exists
     _ensure_demo_users(conn)
     conn.close()
 
@@ -832,7 +835,7 @@ if st.session_state.app_mode == "admin":
         st.markdown("<br>", unsafe_allow_html=True)
 
         for u in users_list:
-            plan_c = PLANS.get(u["plan"],PLANS["free"])["color"]
+            plan_c = PLANS.get(u["plan"],PLANS["personal"])["color"]
             with st.expander(f"{'🛡️' if u['is_admin'] else '👤'}  {u['name']}  ·  {u['email']}  ·  {u['plan'].upper()}", expanded=False):
                 info_col, action_col = st.columns([2,1])
                 with info_col:
@@ -843,7 +846,7 @@ if st.session_state.app_mode == "admin":
                       <div><b style="color:#5a6a7a;">Words Today</b><br><b style="color:#c9a84c;">{u['today_words']:,}</b></div>
                       <div><b style="color:#5a6a7a;">Total Words</b><br><b>{u['total_words']:,}</b></div>
                       <div><b style="color:#5a6a7a;">Active Days</b><br>{u['active_days']}</div>
-                      <div><b style="color:#5a6a7a;">Daily Limit</b><br>{PLANS.get(u["plan"],PLANS["free"])["daily_words"]:,}</div>
+                      <div><b style="color:#5a6a7a;">Daily Limit</b><br>{PLANS.get(u["plan"],PLANS["personal"])["daily_words"]:,}</div>
                     </div>""", unsafe_allow_html=True)
                 with action_col:
                     st.markdown(f'<span class="plan-badge" style="background:{plan_c}22;color:{plan_c};border:1px solid {plan_c}44;">{u["plan"].upper()}</span>', unsafe_allow_html=True)
@@ -872,7 +875,7 @@ if st.session_state.app_mode == "admin":
         with pc1:
             st.markdown("**Plan Distribution**")
             for plan_id, cnt in stats["plan_dist"].items():
-                pc = PLANS.get(plan_id, PLANS["free"])["color"]
+                pc = PLANS.get(plan_id, PLANS["personal"])["color"]
                 pct_v = int(cnt / max(stats["total_users"],1) * 100)
                 st.markdown(f"""
                 <div style="display:flex;align-items:center;gap:0.8rem;margin-bottom:0.5rem;">
@@ -1039,7 +1042,7 @@ if not st.session_state.user:
 # ══════════════════════════════════════════════════════════════════════════════
 user      = get_user(st.session_state.user["id"])
 plan      = user["plan"]
-plan_info = PLANS[plan]
+plan_info = PLANS.get(plan, PLANS["personal"])
 usage     = get_today_usage(user["id"])
 used_words= usage["total"]
 limit     = plan_info["daily_words"]
