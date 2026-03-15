@@ -266,6 +266,45 @@ div[data-testid="stAlert"] p { color: #1a1a2e !important; }
 
 # ── SCORING ENGINE ─────────────────────────────────────────────────────────
 
+def make_copy_btn(copy_id: str, text: str, label: str = "📋 Copy",
+                  color: str = "#c9a84c", bg: str = "#1a1a2e", border: str = "#c9a84c") -> str:
+    """Render a robust clipboard copy button with execCommand fallback."""
+    safe = (text
+            .replace("\\", "\\\\")
+            .replace("`", "\\`")
+            .replace("$", "\\$")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;"))
+    return f'''
+<div style="margin-top:0.5rem;display:flex;gap:0.6rem;align-items:center;">
+  <button id="btn-{copy_id}"
+    onclick="(function(){{
+      var txt = `{safe}`;
+      if(navigator.clipboard && window.isSecureContext){{
+        navigator.clipboard.writeText(txt).then(function(){{
+          var b=document.getElementById('btn-{copy_id}');
+          b.innerHTML='✅ Copied!';
+          setTimeout(function(){{b.innerHTML='{label}';}},2000);
+        }});
+      }} else {{
+        var ta=document.createElement('textarea');
+        ta.value=txt; ta.style.cssText='position:fixed;opacity:0;top:0;left:0;';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        try{{document.execCommand('copy');}}catch(e){{}}
+        document.body.removeChild(ta);
+        var b=document.getElementById('btn-{copy_id}');
+        b.innerHTML='✅ Copied!';
+        setTimeout(function(){{b.innerHTML='{label}';}},2000);
+      }}
+    }})();"
+    style="background:{bg};color:{color};border:1.5px solid {border};border-radius:8px;
+           padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;
+           font-family:'DM Sans',sans-serif;transition:opacity 0.2s;">
+    {label}
+  </button>
+</div>'''
+
+
 def compute_scores(text: str) -> dict:
     if not text or not text.strip():
         return {}
@@ -742,7 +781,7 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v4.0 · Full Suite</div>
+  <div class="hero-badge">v4.1 · Full Suite</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Ollama & Groq · 8-dimension scoring</div>
 </div>
@@ -753,9 +792,16 @@ st.markdown("""
 for key, default in [
     ("output_text", ""), ("paraphrase_out", ""),
     ("grammar_corrected", ""), ("grammar_issues", []),
+    ("clear_input", False),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
+
+# Handle clear input flag before widget renders
+if st.session_state.clear_input:
+    st.session_state.input_text = ""
+    st.session_state.output_text = ""
+    st.session_state.clear_input = False
 
 # ── TABS ───────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["✍️  Humanizer", "🔄  Paraphraser", "✅  Grammar Checker"])
@@ -767,15 +813,51 @@ with tab1:
     col_in, col_out = st.columns([1, 1], gap="large")
 
     with col_in:
-        st.markdown('<div class="card-title">📄 Input Text</div>', unsafe_allow_html=True)
+        # ── Header row: title + paste/clear buttons ────────────────────
+        hdr_left, hdr_right = st.columns([3, 2])
+        with hdr_left:
+            st.markdown('<div class="card-title">📄 Input Text</div>', unsafe_allow_html=True)
+        with hdr_right:
+            st.markdown('''
+            <div style="display:flex;gap:0.5rem;justify-content:flex-end;padding-top:0.15rem;">
+              <button id="paste-btn"
+                onclick="(function(){{
+                  if(navigator.clipboard && navigator.clipboard.readText){{
+                    navigator.clipboard.readText().then(function(txt){{
+                      var ta=window.parent.document.querySelector('textarea[data-testid=stTextArea]');
+                      if(!ta)ta=window.parent.document.querySelector('textarea');
+                      if(ta){{
+                        var nativeInputValueSetter=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
+                        nativeInputValueSetter.call(ta,txt);
+                        ta.dispatchEvent(new Event('input',{{bubbles:true}}));
+                      }}
+                    }}).catch(function(){{alert('Paste: Please use Ctrl+V / Cmd+V in the text box directly');}});
+                  }} else {{ alert('Paste: Please use Ctrl+V / Cmd+V in the text box directly'); }}
+                }})();"
+                style="background:#1a3a2e;color:#6fcf97;border:1px solid #4a7c59;
+                       border-radius:7px;padding:0.3rem 0.75rem;cursor:pointer;
+                       font-size:0.78rem;font-family:'DM Sans',sans-serif;">
+                📋 Paste
+              </button>
+            </div>''', unsafe_allow_html=True)
+
         input_text = st.text_area(
-            label="Input", height=380,
+            label="Input", height=360,
             placeholder="Paste your AI-generated text here (5000+ words supported)…",
             label_visibility="collapsed", key="input_text",
         )
+
+        # ── Below textarea: word count + Clear button ──────────────────
         wc_in = len(input_text.split()) if input_text.strip() else 0
         sc_in = len(re.split(r'[.!?]+', input_text)) if input_text.strip() else 0
-        st.markdown(f'<span class="wc-badge">📝 {wc_in:,} words · {sc_in} sentences</span>', unsafe_allow_html=True)
+        badge_col, clear_col = st.columns([3, 1])
+        with badge_col:
+            st.markdown(f'<span class="wc-badge">📝 {wc_in:,} words · {sc_in} sentences</span>', unsafe_allow_html=True)
+        with clear_col:
+            if st.button("🗑️ Clear", key="clear_btn", use_container_width=True,
+                         disabled=(not input_text.strip())):
+                st.session_state.clear_input = True
+                st.rerun()
 
         if input_text.strip():
             scores_in = compute_scores(input_text)
@@ -801,17 +883,9 @@ with tab1:
                     color:#1a1a2e;white-space:pre-wrap;">{output_text}</div>''',
                 unsafe_allow_html=True,
             )
-            # ── Copy button (JS clipboard) ─────────────────────────────
-            copy_id = "humanizer-out"
-            st.markdown(f'''
-            <div style="margin-top:0.5rem;display:flex;gap:0.6rem;align-items:center;">
-              <textarea id="{copy_id}" style="position:absolute;left:-9999px;">{output_text}</textarea>
-              <button onclick="navigator.clipboard.writeText(document.getElementById(\'{copy_id}\').value).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy Text',2000)}})"
-                style="background:#1a1a2e;color:#c9a84c;border:1.5px solid #c9a84c;border-radius:8px;
-                       padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;font-family:DM Sans,sans-serif;">
-                📋 Copy Text
-              </button>
-            </div>''', unsafe_allow_html=True)
+            # ── Copy button (robust fallback) ──────────────────────────
+            _copy_html1 = make_copy_btn("humanizer-out", output_text, "📋 Copy Text")
+            st.markdown(_copy_html1, unsafe_allow_html=True)
 
             scores_out = compute_scores(output_text)
             wc_out = scores_out.get("word_count", 0)
@@ -894,16 +968,8 @@ with tab2:
                     color:#1a1a2e;white-space:pre-wrap;">{para_out}</div>''',
                 unsafe_allow_html=True,
             )
-            copy_id_p = "para-out"
-            st.markdown(f'''
-            <div style="margin-top:0.5rem;">
-              <textarea id="{copy_id_p}" style="position:absolute;left:-9999px;">{para_out}</textarea>
-              <button onclick="navigator.clipboard.writeText(document.getElementById(\'{copy_id_p}\').value).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy',2000)}})"
-                style="background:#1a1a2e;color:#c9a84c;border:1.5px solid #c9a84c;border-radius:8px;
-                       padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;font-family:DM Sans,sans-serif;">
-                📋 Copy
-              </button>
-            </div>''', unsafe_allow_html=True)
+            _copy_html2 = make_copy_btn("para-out", para_out, "📋 Copy")
+            st.markdown(_copy_html2, unsafe_allow_html=True)
             wc_po = len(para_out.split())
             st.markdown(f'<span class="wc-badge">📝 {wc_po:,} words</span>', unsafe_allow_html=True)
         else:
@@ -961,16 +1027,8 @@ with tab3:
                     color:#1a1a2e;white-space:pre-wrap;">{gram_corrected}</div>''',
                 unsafe_allow_html=True,
             )
-            copy_id_g = "gram-out"
-            st.markdown(f'''
-            <div style="margin-top:0.5rem;">
-              <textarea id="{copy_id_g}" style="position:absolute;left:-9999px;">{gram_corrected}</textarea>
-              <button onclick="navigator.clipboard.writeText(document.getElementById(\'{copy_id_g}\').value).then(()=>{{this.textContent='✅ Copied!';setTimeout(()=>this.textContent='📋 Copy Corrected',2000)}})"
-                style="background:#1a3a2e;color:#6fcf97;border:1.5px solid #4a7c59;border-radius:8px;
-                       padding:0.4rem 1rem;cursor:pointer;font-size:0.82rem;font-family:DM Sans,sans-serif;">
-                📋 Copy Corrected
-              </button>
-            </div>''', unsafe_allow_html=True)
+            _copy_html3 = make_copy_btn("gram-out", gram_corrected, "📋 Copy Corrected", "#6fcf97", "#1a3a2e", "#4a7c59")
+            st.markdown(_copy_html3, unsafe_allow_html=True)
 
             # Issues table
             issues = st.session_state.grammar_issues
