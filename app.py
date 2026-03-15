@@ -158,20 +158,26 @@ html, body, [class*="css"] {
 }
 .metric-chip b { color:var(--ink); font-weight:600; }
 
+/* Radio buttons — cream bg so text always readable */
+div[data-testid="stRadio"] > div { gap:0.4rem !important; }
 div[data-testid="stRadio"] label {
-  border:1px solid var(--border) !important;
-  border-radius:8px !important; padding:0.4rem 0.9rem !important;
+  border:1px solid rgba(201,168,76,0.4) !important;
+  border-radius:8px !important; padding:0.45rem 1rem !important;
   cursor:pointer !important; transition:all 0.2s !important;
-  background:white !important;
+  background:#f5f0e8 !important;
 }
+div[data-testid="stRadio"] label > div,
+div[data-testid="stRadio"] label span,
+div[data-testid="stRadio"] label p { color:#1a1a2e !important; font-weight:500 !important; }
 div[data-testid="stRadio"] label:hover {
-  border-color:var(--gold) !important; background:var(--cream) !important;
+  border-color:var(--gold) !important; background:#ede8dc !important;
 }
 
 textarea {
   font-family:'DM Sans',sans-serif !important; font-size:0.9rem !important;
   line-height:1.65 !important; border-radius:10px !important;
-  border:1.5px solid var(--border) !important; background:white !important;
+  border:1.5px solid var(--border) !important;
+  background:white !important; color:#1a1a2e !important;
 }
 textarea:focus {
   border-color:var(--gold) !important;
@@ -191,9 +197,25 @@ div[data-testid="stButton"] > button[kind="primary"]:hover {
   box-shadow:0 6px 20px rgba(26,26,46,0.3) !important;
 }
 
+/* Sidebar */
 [data-testid="stSidebar"] { background:var(--ink) !important; border-right:1px solid rgba(201,168,76,0.2) !important; }
-[data-testid="stSidebar"] * { color:rgba(255,255,255,0.85) !important; }
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span:not([data-testid]),
+[data-testid="stSidebar"] div.stMarkdown,
+[data-testid="stSidebar"] .stMarkdown p { color:rgba(255,255,255,0.88) !important; }
 [data-testid="stSidebar"] h3 { color:var(--gold) !important; font-family:'Playfair Display',serif !important; font-size:1.1rem !important; }
+/* Selectbox */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {
+  background:rgba(255,255,255,0.08) !important;
+  border:1px solid rgba(201,168,76,0.4) !important;
+  border-radius:8px !important; color:white !important;
+}
+/* API key input */
+[data-testid="stSidebar"] input {
+  background:rgba(255,255,255,0.08) !important; color:white !important;
+  border:1px solid rgba(201,168,76,0.4) !important; border-radius:8px !important;
+}
+[data-testid="stSidebar"] input::placeholder { color:rgba(255,255,255,0.35) !important; }
 
 div[data-testid="stProgress"] > div > div {
   background:linear-gradient(90deg,var(--gold),var(--rust)) !important;
