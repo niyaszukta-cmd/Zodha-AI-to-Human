@@ -237,6 +237,28 @@ hr { border:none; border-top:1.5px solid var(--border); margin:1.2rem 0; }
 }
 .improvement-banner .score-delta { font-family:'Playfair Display',serif; font-size:2rem; font-weight:900; white-space:nowrap; }
 .improvement-banner .score-desc { font-size:0.88rem; color:rgba(255,255,255,0.8); line-height:1.5; }
+
+/* ── Force all main-column text to be visible (dark on light) ── */
+.card-title { color: #1a1a2e !important; }
+.score-label { color: #5a6a7a !important; }
+.wc-badge { color: #5a6a7a !important; background: #f5f0e8 !important; border-color: #d4c9b5 !important; }
+.metric-chip { color: #5a6a7a !important; background: #f5f0e8 !important; }
+.metric-chip b { color: #1a1a2e !important; }
+
+/* Main content markdown text — must be dark */
+section.main p,
+section.main span,
+section.main label,
+section.main div:not([class*="sidebar"]) { color: #1a1a2e; }
+section.main .stMarkdown p { color: #1a1a2e !important; }
+section.main strong, section.main b { color: #1a1a2e !important; }
+
+/* st.info / st.warning boxes */
+div[data-testid="stAlert"] p { color: #1a1a2e !important; }
+
+/* Comparison panel metric cards text */
+.comparison-card-label { color: #5a6a7a !important; }
+.comparison-card-val   { color: #1a1a2e !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -622,7 +644,7 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v3.1 · Dual Backend</div>
+  <div class="hero-badge">v3.2 · Dual Backend</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Ollama (local) or Groq (free cloud) · 5000+ words · 8-dimension humanness scoring</div>
 </div>
@@ -646,7 +668,7 @@ with col_in:
 
     if input_text.strip():
         scores_in = compute_scores(input_text)
-        st.markdown("**Before — Humanness Analysis**")
+        st.markdown('<p style="color:#1a1a2e;font-weight:600;margin-top:0.8rem;">Before — Humanness Analysis</p>', unsafe_allow_html=True)
         r1, r2, r3, r4 = st.columns(4)
         with r1: st.markdown(render_score_ring(scores_in["humanness"],    "Humanness"),   unsafe_allow_html=True)
         with r2: st.markdown(render_score_ring(scores_in["flesch"],       "Readability"), unsafe_allow_html=True)
@@ -658,23 +680,28 @@ with col_in:
 
 with col_out:
     st.markdown('<div class="card-title">✨ Humanized Output</div>', unsafe_allow_html=True)
-    output_placeholder = st.empty()
 
     if "output_text" not in st.session_state:
         st.session_state.output_text = ""
     output_text = st.session_state.output_text
 
-    output_placeholder.text_area(
-        label="Output", value=output_text, height=380,
-        label_visibility="collapsed", key="output_display",
-    )
-
+    # ── Render output directly — no st.empty() to avoid key conflicts ──
     if output_text.strip():
+        # Show as readable styled div + copyable text area
+        st.markdown(
+            f'''<div style="
+                background:white; border:1.5px solid #c9a84c; border-radius:10px;
+                padding:1.1rem 1.3rem; min-height:380px; max-height:420px;
+                overflow-y:auto; font-family:DM Sans,sans-serif; font-size:0.9rem;
+                line-height:1.7; color:#1a1a2e; white-space:pre-wrap;
+            ">{output_text}</div>''',
+            unsafe_allow_html=True,
+        )
         scores_out = compute_scores(output_text)
         wc_out = scores_out.get("word_count", 0)
         sc_out = scores_out.get("sent_count", 0)
         st.markdown(f'<span class="wc-badge">📝 {wc_out:,} words · {sc_out} sentences</span>', unsafe_allow_html=True)
-        st.markdown("**After — Humanness Analysis**")
+        st.markdown('<p style="color:#1a1a2e;font-weight:600;margin-top:0.8rem;">After — Humanness Analysis</p>', unsafe_allow_html=True)
         r1, r2, r3, r4 = st.columns(4)
         with r1: st.markdown(render_score_ring(scores_out["humanness"],    "Humanness"),   unsafe_allow_html=True)
         with r2: st.markdown(render_score_ring(scores_out["flesch"],       "Readability"), unsafe_allow_html=True)
@@ -682,6 +709,20 @@ with col_out:
         with r4: st.markdown(render_score_ring(scores_out["sl_variation"], "Rhythm Var"),  unsafe_allow_html=True)
         st.markdown(render_metrics(scores_out), unsafe_allow_html=True)
     else:
+        # Empty state placeholder
+        st.markdown(
+            '''<div style="
+                background:white; border:1.5px dashed #d4c9b5; border-radius:10px;
+                min-height:380px; display:flex; align-items:center; justify-content:center;
+                flex-direction:column; gap:0.6rem; color:#9a8a7a;
+            ">
+              <div style="font-size:2rem;">✨</div>
+              <div style="font-size:0.9rem; font-family:DM Sans,sans-serif;">
+                Humanized text will appear here
+              </div>
+            </div>''',
+            unsafe_allow_html=True,
+        )
         scores_out = {}
 
 
