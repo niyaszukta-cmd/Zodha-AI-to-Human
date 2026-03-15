@@ -261,6 +261,49 @@ div[data-testid="stAlert"] p { color: #1a1a2e !important; }
 /* Comparison panel metric cards text */
 .comparison-card-label { color: #5a6a7a !important; }
 .comparison-card-val   { color: #1a1a2e !important; }
+
+/* ── Layout containment — prevent output from leaking ── */
+.output-box {
+  background: white;
+  border: 1.5px solid #c9a84c;
+  border-radius: 10px;
+  padding: 1.1rem 1.3rem;
+  height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: #1a1a2e;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+.output-box-para {
+  background: white;
+  border: 1.5px solid #c9a84c;
+  border-radius: 10px;
+  padding: 1.1rem 1.3rem;
+  height: 340px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: #1a1a2e;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+/* Force columns to not overflow their container */
+[data-testid="column"] {
+  overflow: hidden !important;
+  min-width: 0 !important;
+}
+/* Comparison panel scores — prevent overflow */
+[data-testid="stHorizontalBlock"] {
+  flex-wrap: wrap !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -442,32 +485,66 @@ def render_metrics(sc: dict) -> str:
 
 STYLE_PROMPTS = {
     "Academic": (
-        "You are an expert academic editor. Rewrite the following text to sound like it was written "
-        "by a thoughtful, experienced scholar. Use varied sentence structures, precise vocabulary, "
-        "appropriate hedging language, and natural academic discourse markers. Avoid robotic repetition, "
-        "overly uniform sentence lengths, and AI-style list-heavy formatting. Maintain the original meaning exactly."
+        "You are an expert academic editor with 20 years of experience. Your task is to rewrite the "
+        "given text so it reads as if written by a real, thoughtful human scholar — NOT an AI. "
+        "MANDATORY requirements for high humanness: "
+        "(1) Vary sentence length dramatically — mix very short sentences (4-8 words) with long complex ones (25-40 words). "
+        "(2) Use natural hedging: 'it appears that', 'the evidence suggests', 'one might argue'. "
+        "(3) Add discourse connectors: 'That said,', 'Interestingly,', 'What is particularly striking here is'. "
+        "(4) Occasionally use rhetorical questions to engage the reader. "
+        "(5) Break ALL passive voice constructions into active voice. "
+        "(6) Use 'we' and 'our' naturally where appropriate for academic writing. "
+        "(7) Vary paragraph structure — some short (2 sentences), some longer. "
+        "Preserve all original meaning and facts exactly."
     ),
     "Conversational": (
-        "You are a skilled writer who specialises in warm, engaging conversational prose. Rewrite the "
-        "following text as if a knowledgeable friend is explaining it naturally — include occasional "
-        "contractions, rhetorical questions, varied rhythm, and a genuine personal voice. Keep all key "
-        "facts intact but make it feel truly human and approachable."
+        "You are rewriting text to sound like a real human speaking naturally. "
+        "MANDATORY requirements: "
+        "(1) Use contractions throughout: it's, don't, they're, we've, can't, that's, it's been, we're. "
+        "(2) Alternate sentence lengths wildly — some just 3-5 words, others 20-30 words. "
+        "(3) Add personal asides: 'And honestly,', 'Here's the thing —', 'What's really interesting is'. "
+        "(4) Use rhetorical questions: 'But why does this matter?', 'So what does this mean for us?'. "
+        "(5) Use everyday vocabulary — replace formal words with simpler alternatives. "
+        "(6) Use first-person 'I', 'we', 'you' naturally. "
+        "(7) Add natural transition phrases: 'On top of that,', 'And yet,', 'At the end of the day'. "
+        "Preserve all key facts and meaning."
     ),
     "Professional": (
-        "You are a senior business writer. Rewrite the following text with the polished clarity of "
-        "a seasoned professional — concise yet nuanced, authoritative but not stiff. Use active voice "
-        "where possible, vary sentence cadence, and ensure it reads as if written by a confident human "
-        "expert rather than a machine. Preserve every key idea."
+        "You are a senior writer at a top consulting firm. Rewrite the text to sound like a confident, "
+        "experienced human professional — authoritative yet natural, never robotic. "
+        "MANDATORY requirements: "
+        "(1) Mix short punchy sentences with longer analytical ones — never uniform length. "
+        "(2) Use active voice for at least 85% of sentences. "
+        "(3) Add professional transitions: 'That said,', 'More importantly,', 'This matters because'. "
+        "(4) Use contractions where appropriate: it's, we've, doesn't, that's. "
+        "(5) Use 'we' and 'our' to create a collaborative tone. "
+        "(6) Begin some sentences with conjunctions for rhythm: 'And this is why...', 'But the challenge is'. "
+        "(7) Vary paragraph length — punchy short paragraphs alongside fuller ones. "
+        "Preserve every key idea and fact."
     ),
     "Journalistic": (
-        "You are an experienced journalist from a top-tier publication. Rewrite the text using journalistic "
-        "craft — punchy lead sentences, vivid specific detail, varied paragraph lengths, active voice, "
-        "and a compelling narrative thread. Make it read as if published in a quality magazine. Keep all facts."
+        "You are a senior writer at The Economist or The Atlantic. Rewrite using masterful journalistic craft. "
+        "MANDATORY requirements: "
+        "(1) Open with a short, punchy hook sentence (5-10 words maximum). "
+        "(2) Vary sentence rhythm dramatically — short punchy sentences followed by long flowing ones. "
+        "(3) Use specific, vivid details and concrete language. "
+        "(4) Use active voice throughout. "
+        "(5) Add journalist's transitions: 'The result?', 'Consider this:', 'Yet the picture is more complex.' "
+        "(6) Use contractions: it's, that's, they're, we've. "
+        "(7) Create narrative momentum — each sentence should pull the reader to the next. "
+        "Keep all facts and key information."
     ),
     "Creative / Expressive": (
-        "You are a creative writer with a distinctive literary voice. Rewrite the following text with "
-        "expressive flair — use metaphor, rhythm, sensory detail, and stylistic variety to make the prose "
-        "genuinely engaging and human. Preserve all the original ideas but elevate the writing artistically."
+        "You are a celebrated literary writer. Transform this text into vivid, expressive prose. "
+        "MANDATORY requirements: "
+        "(1) Use striking sentence rhythm variation — very short sentences for impact, long flowing ones for depth. "
+        "(2) Weave in metaphor, analogy, or sensory language naturally. "
+        "(3) Use contractions and natural first-person voice. "
+        "(4) Add emotional resonance: phrases that connect the ideas to human experience. "
+        "(5) Use rhetorical devices: repetition for emphasis, questions for engagement. "
+        "(6) Vary paragraph lengths — single-sentence paragraphs for punch, fuller ones for development. "
+        "(7) Make transitions feel organic and conversational, not mechanical. "
+        "Preserve all original meaning and ideas."
     ),
 }
 
@@ -513,9 +590,24 @@ GRAMMAR_SYSTEM = (
 )
 
 INTENSITY_INSTRUCTIONS = {
-    "Light":    "Make subtle improvements — fix robotic phrasing and uniformity, but keep the structure largely intact.",
-    "Moderate": "Substantially rewrite for naturalness — restructure sentences, vary rhythm, enrich vocabulary.",
-    "Deep":     "Completely transform the writing. Vary structure radically, add human discourse markers, inject personality while preserving all meaning.",
+    "Light": (
+        "Lightly edit for naturalness. Fix the most robotic phrases and any sentences that are identical "
+        "in length. Add 1-2 contractions and 1-2 transition phrases. Keep 80% of the original structure."
+    ),
+    "Moderate": (
+        "Substantially rewrite for human naturalness. Restructure at least half the sentences. "
+        "Vary sentence length so the shortest is under 8 words and longest is over 25 words. "
+        "Add contractions, discourse markers, and active voice throughout. "
+        "The result should feel like a thoughtful human writer, not an AI."
+    ),
+    "Deep": (
+        "Completely transform this into natural, distinctly human writing. "
+        "Every sentence must be restructured. Sentence lengths must vary dramatically. "
+        "Use contractions freely. Add personality through transitions, rhetorical questions, and natural asides. "
+        "Aggressively convert passive to active voice. "
+        "The final text must score above 60 on Flesch Reading Ease and above 50 on humanness metrics. "
+        "Preserve all meaning and facts — only the style and structure should change."
+    ),
 }
 
 
@@ -540,14 +632,15 @@ def _build_prompt(style: str, intensity: str, chunk: str) -> tuple:
     intensity_note = INTENSITY_INSTRUCTIONS[intensity]
     user_prompt = f"""{intensity_note}
 
-IMPORTANT RULES:
-- Preserve 100% of the original meaning and all factual content
-- Do NOT add new information or remove key points
-- Do NOT use bullet points or numbered lists unless the original had them
-- Output ONLY the rewritten text, no preamble or commentary
-- Aim for natural variation in sentence structure and length
-- Use active voice where appropriate
-- Include natural discourse markers and transitions
+CRITICAL RULES — follow these exactly:
+1. Output ONLY the rewritten text — no preamble, no "Here is the rewritten text:", no commentary.
+2. Preserve 100% of the original meaning, facts, and key points.
+3. Do NOT add bullet points or numbered lists unless the original had them.
+4. SENTENCE LENGTH VARIATION IS MANDATORY — your output must contain both very short sentences (under 8 words) AND long sentences (over 25 words). Uniform sentence length is a failure.
+5. Use contractions naturally (it's, don't, we've, that's, they're, isn't, can't).
+6. Use active voice for at least 80% of sentences.
+7. Include at least 3 natural transition phrases (However, That said, What's more, Interestingly, As a result, In fact, Of course, And yet).
+8. Do NOT start every sentence with "The" or with the same word pattern.
 
 TEXT TO REWRITE:
 \"\"\"
@@ -781,7 +874,7 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v4.1 · Full Suite</div>
+  <div class="hero-badge">v4.2 · Full Suite</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Ollama & Groq · 8-dimension scoring</div>
 </div>
@@ -877,10 +970,7 @@ with tab1:
 
         if output_text.strip():
             st.markdown(
-                f'''<div style="background:white;border:1.5px solid #c9a84c;border-radius:10px;
-                    padding:1.1rem 1.3rem;min-height:340px;max-height:400px;overflow-y:auto;
-                    font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;
-                    color:#1a1a2e;white-space:pre-wrap;">{output_text}</div>''',
+                f'<div class="output-box">{output_text}</div>',
                 unsafe_allow_html=True,
             )
             # ── Copy button (robust fallback) ──────────────────────────
@@ -962,10 +1052,7 @@ with tab2:
 
         if para_out.strip():
             st.markdown(
-                f'''<div style="background:white;border:1.5px solid #c9a84c;border-radius:10px;
-                    padding:1.1rem 1.3rem;min-height:320px;max-height:380px;overflow-y:auto;
-                    font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;
-                    color:#1a1a2e;white-space:pre-wrap;">{para_out}</div>''',
+                f'<div class="output-box-para">{para_out}</div>',
                 unsafe_allow_html=True,
             )
             _copy_html2 = make_copy_btn("para-out", para_out, "📋 Copy")
@@ -1021,10 +1108,7 @@ with tab3:
 
         if gram_corrected.strip():
             st.markdown(
-                f'''<div style="background:white;border:1.5px solid #4a7c59;border-radius:10px;
-                    padding:1.1rem 1.3rem;min-height:200px;max-height:280px;overflow-y:auto;
-                    font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;
-                    color:#1a1a2e;white-space:pre-wrap;">{gram_corrected}</div>''',
+                f'<div style="background:white;border:1.5px solid #4a7c59;border-radius:10px;padding:1.1rem 1.3rem;height:260px;overflow-y:auto;font-family:DM Sans,sans-serif;font-size:0.9rem;line-height:1.7;color:#1a1a2e;white-space:pre-wrap;word-break:break-word;">{gram_corrected}</div>',
                 unsafe_allow_html=True,
             )
             _copy_html3 = make_copy_btn("gram-out", gram_corrected, "📋 Copy Corrected", "#6fcf97", "#1a3a2e", "#4a7c59")
