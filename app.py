@@ -1,5 +1,5 @@
 import streamlit as st
-import anthropic
+import requests
 import re
 import time
 import math
@@ -431,7 +431,7 @@ def chunk_text(text: str, max_words: int = 800) -> list:
     return chunks if chunks else [text]
 
 
-def humanize_chunk(client: anthropic.Anthropic, chunk: str, style: str, intensity: str) -> str:
+def humanize_chunk(ollama_url: str, model: str, chunk: str, style: str, intensity: str) -> str:
     system_prompt = STYLE_PROMPTS[style]
     intensity_note = INTENSITY_INSTRUCTIONS[intensity]
     user_prompt = f"""{intensity_note}
@@ -450,13 +450,18 @@ TEXT TO REWRITE:
 {chunk}
 \"\"\"
 """
-    message = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=2048,
-        messages=[{"role": "user", "content": user_prompt}],
-        system=system_prompt,
-    )
-    return message.content[0].text.strip()
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ],
+        "stream": False,
+        "options": {"num_predict": 2048},
+    }
+    resp = requests.post(f"{ollama_url}/api/chat", json=payload, timeout=300)
+    resp.raise_for_status()
+    return resp.json()["message"]["content"].strip()
 
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────
@@ -472,11 +477,42 @@ with st.sidebar:
     st.markdown("### 🔧 Rewrite Intensity")
     intensity = st.radio("Intensity", ["Light", "Moderate", "Deep"], index=1, label_visibility="collapsed")
 
-    st.markdown("### 🔑 API Key")
-    api_key_input = st.text_input(
-        "Anthropic API Key", type="password", placeholder="sk-ant-...",
-        label_visibility="collapsed", help="Your Anthropic API key. Never stored.",
+    st.markdown("### 🌐 Ollama Settings")
+    ollama_url = st.text_input(
+        "Ollama URL", value="http://localhost:11434",
+        label_visibility="collapsed",
+        help="Default: http://localhost:11434",
     )
+
+    st.markdown("### 🤖 Model")
+
+    # Fetch available models from Ollama
+    available_models = []
+    try:
+        r = requests.get(f"{ollama_url}/api/tags", timeout=5)
+        if r.status_code == 200:
+            available_models = [m["name"] for m in r.json().get("models", [])]
+    except Exception:
+        pass
+
+    RECOMMENDED = ["llama3.2:latest", "llama3.1:latest", "llama3:latest",
+                   "mistral:latest", "mixtral:latest", "gemma2:latest",
+                   "phi3:latest", "qwen2.5:latest"]
+
+    if available_models:
+        model_choice = st.selectbox("Model", available_models, label_visibility="collapsed")
+        st.markdown(
+            f'<div style="font-size:0.72rem;color:rgba(255,255,255,0.5);margin-top:0.2rem;">' +
+            f'✅ {len(available_models)} model(s) found</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        model_choice = st.selectbox("Model", RECOMMENDED, label_visibility="collapsed")
+        st.markdown(
+            '<div style="font-size:0.72rem;color:#e87a7a;margin-top:0.2rem;">' +
+            '⚠️ Ollama not detected — is it running?</div>',
+            unsafe_allow_html=True
+        )
 
     st.markdown("---")
     st.markdown("""
@@ -496,8 +532,8 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("""
     <div style="font-size:0.72rem; color:rgba(255,255,255,0.3);">
-    Processes 5000+ words in parallel chunks.<br>
-    All processing via Anthropic API.<br>
+    100% local · No internet after setup.<br>
+    Processes 5000+ words in chunks.<br>
     Zero external scoring dependencies.
     </div>
     """, unsafe_allow_html=True)
@@ -507,9 +543,9 @@ with st.sidebar:
 
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v2.1 · NYZTrade</div>
+  <div class="hero-badge">v3.0 · Ollama Local</div>
   <div class="hero-title">HumanizeAI</div>
-  <div class="hero-sub">Transform AI-generated text into natural, expressive human writing — with intelligent scoring</div>
+  <div class="hero-sub">100% local AI rewriting via Ollama · No API costs · No internet required · Intelligent scoring</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -583,15 +619,13 @@ with btn_col:
     )
 
 with info_col:
-    if not api_key_input:
-        st.info("🔑 Add your Anthropic API key in the sidebar to begin.")
-    elif not input_text.strip():
+    if not input_text.strip():
         st.info("📄 Paste your text in the input panel above.")
     else:
         chunks = chunk_text(input_text)
         st.markdown(
             f'<div class="wc-badge">🔀 Will process in {len(chunks)} chunk{"s" if len(chunks)>1 else ""} '
-            f'· Style: {style} · Intensity: {intensity}</div>',
+            f'· {model_choice} · {intensity}</div>',
             unsafe_allow_html=True,
         )
 
@@ -599,13 +633,21 @@ with info_col:
 # ── PROCESSING LOGIC ───────────────────────────────────────────────────────
 
 if run_btn:
-    if not api_key_input:
-        st.error("Please enter your Anthropic API key in the sidebar.")
-    elif not input_text.strip():
+    if not input_text.strip():
         st.error("Please enter some text to humanize.")
     else:
         try:
-            client = anthropic.Anthropic(api_key=api_key_input)
+            # Quick connectivity check
+            try:
+                ping = requests.get(f"{ollama_url}/api/tags", timeout=5)
+                ping.raise_for_status()
+            except Exception:
+                st.error(
+                    f"❌ Cannot reach Ollama at **{ollama_url}**. "
+                    "Make sure Ollama is running (`ollama serve`) and the URL is correct."
+                )
+                st.stop()
+
             chunks = chunk_text(input_text)
             n = len(chunks)
             progress_bar = st.progress(0, text="Initialising…")
@@ -613,23 +655,23 @@ if run_btn:
             results = []
             for i, chunk in enumerate(chunks):
                 status_box.markdown(
-                    f'<div class="wc-badge">⚡ Processing chunk {i+1} of {n} ({len(chunk.split())} words)…</div>',
+                    f'<div class="wc-badge">⚡ Processing chunk {i+1} of {n} ' +
+                    f'({len(chunk.split())} words) via {model_choice}…</div>',
                     unsafe_allow_html=True,
                 )
-                humanized = humanize_chunk(client, chunk, style, intensity)
+                humanized = humanize_chunk(ollama_url, model_choice, chunk, style, intensity)
                 results.append(humanized)
                 progress_bar.progress((i + 1) / n, text=f"Chunk {i+1}/{n} complete")
-                time.sleep(0.1)
 
             progress_bar.progress(1.0, text="✓ Complete!")
             status_box.empty()
             st.session_state.output_text = "\n\n".join(results)
             st.rerun()
 
-        except anthropic.AuthenticationError:
-            st.error("❌ Invalid API key. Please check your Anthropic API key.")
-        except anthropic.RateLimitError:
-            st.error("⚠️ Rate limit hit. Please wait a moment and try again.")
+        except requests.exceptions.ConnectionError:
+            st.error(f"❌ Connection refused at {ollama_url}. Run `ollama serve` first.")
+        except requests.exceptions.Timeout:
+            st.error("⏱️ Request timed out. The model may be loading — try again in a moment.")
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
 
