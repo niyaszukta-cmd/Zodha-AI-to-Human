@@ -6,6 +6,21 @@ import time
 import math
 import json
 import os
+import io
+from datetime import datetime
+try:
+    import pdfplumber
+    PDF_OK = True
+except ImportError:
+    PDF_OK = False
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import (Font, PatternFill, Alignment,
+                                  Border, Side, GradientFill)
+    from openpyxl.utils import get_column_letter
+    XLSX_OK = True
+except ImportError:
+    XLSX_OK = False
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG
@@ -306,6 +321,356 @@ def grammar_check(api_key, model, text):
     except: return {"corrected":raw,"issues":[]}
 
 # ══════════════════════════════════════════════════════════════════════════════
+# RESEARCH TOOLS — Citation, Summariser, Literature Review
+# ══════════════════════════════════════════════════════════════════════════════
+
+CITATION_STYLES = {
+    "APA 7th":     "apa7",
+    "MLA 9th":     "mla9",
+    "Chicago 17th":"chicago17",
+    "Harvard":     "harvard",
+    "Vancouver":   "vancouver",
+    "IEEE":        "ieee",
+}
+
+# ── CrossRef DOI metadata fetch ────────────────────────────────────────────
+
+def fetch_doi_metadata(doi_or_url: str) -> dict:
+    """Fetch metadata from CrossRef for a DOI or DOI URL."""
+    doi = doi_or_url.strip()
+    # Extract raw DOI from URL forms
+    for prefix in ["https://doi.org/", "http://doi.org/",
+                   "https://dx.doi.org/", "http://dx.doi.org/"]:
+        if doi.startswith(prefix):
+            doi = doi[len(prefix):]
+            break
+    if doi.startswith("doi:"):
+        doi = doi[4:]
+    doi = doi.strip("/")
+    try:
+        r = requests.get(
+            f"https://api.crossref.org/works/{doi}",
+            headers={"User-Agent": "HumanizeAI/1.0 (nyztrade@gmail.com)"},
+            timeout=15
+        )
+        r.raise_for_status()
+        msg = r.json().get("message", {})
+        authors = msg.get("author", [])
+        author_list = []
+        for a in authors:
+            given  = a.get("given", "")
+            family = a.get("family", "")
+            name   = f"{family}, {given}" if given else family
+            if name.strip(): author_list.append(name)
+        year = ""
+        pub  = msg.get("published", msg.get("published-print", msg.get("published-online", {})))
+        dp   = pub.get("date-parts", [[]])
+        if dp and dp[0]: year = str(dp[0][0])
+        journal = ""
+        cp = msg.get("container-title", [])
+        if cp: journal = cp[0]
+        return {
+            "doi":      doi,
+            "title":    msg.get("title", [""])[0],
+            "authors":  author_list,
+            "year":     year,
+            "journal":  journal,
+            "volume":   msg.get("volume", ""),
+            "issue":    msg.get("issue", ""),
+            "pages":    msg.get("page", ""),
+            "publisher":msg.get("publisher", ""),
+            "url":      f"https://doi.org/{doi}",
+            "type":     msg.get("type", "journal-article"),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+def format_citation(meta: dict, style: str) -> str:
+    """Format metadata into a citation string for the given style."""
+    if "error" in meta:
+        return f"Error fetching metadata: {meta['error']}"
+
+    authors = meta.get("authors", [])
+    title   = meta.get("title", "Untitled")
+    year    = meta.get("year", "n.d.")
+    journal = meta.get("journal", "")
+    vol     = meta.get("volume", "")
+    issue   = meta.get("issue", "")
+    pages   = meta.get("pages", "")
+    doi     = meta.get("doi", "")
+    pub     = meta.get("publisher", "")
+    url     = meta.get("url", "")
+
+    def apa_authors(au_list):
+        if not au_list: return "Unknown Author"
+        if len(au_list) == 1: return au_list[0]
+        if len(au_list) <= 20:
+            return ", ".join(au_list[:-1]) + ", & " + au_list[-1]
+        return ", ".join(au_list[:19]) + ", ... " + au_list[-1]
+
+    def mla_author_format(au_list):
+        if not au_list: return "Unknown Author"
+        if len(au_list) == 1: return au_list[0]
+        parts = au_list[0].split(", ")
+        first_inv = f"{parts[0]}, {parts[1]}" if len(parts) == 2 else au_list[0]
+        if len(au_list) == 2:
+            p2 = au_list[1].split(", ")
+            second = f"{p2[1]} {p2[0]}" if len(p2)==2 else au_list[1]
+            return f"{first_inv}, and {second}"
+        return f"{first_inv}, et al"
+
+    vol_issue = f"{vol}({issue})" if vol and issue else vol or issue
+    doi_str   = f"https://doi.org/{doi}" if doi else url
+
+    if style == "apa7":
+        au  = apa_authors(authors)
+        ji  = f"*{journal}*" if journal else pub or "Unknown Source"
+        vi  = f", *{vol_issue}*" if vol_issue else ""
+        pg  = f", {pages}" if pages else ""
+        doi_link = (f"\n  https://doi.org/{doi}") if doi else ""
+        return f"{au} ({year}). {title}. {ji}{vi}{pg}.{doi_link}"
+
+    elif style == "mla9":
+        au  = mla_author_format(authors)
+        jtl = f"*{journal}*" if journal else ""
+        vi  = f"vol. {vol}" if vol else ""
+        is_ = f"no. {issue}" if issue else ""
+        vi_is = ", ".join(filter(None, [vi, is_]))
+        pg  = f"pp. {pages}" if pages else ""
+        do  = f"doi:{doi}" if doi else url
+        parts_list = list(filter(None, [jtl, vi_is, year, pg, do]))
+        return '%s "%s." %s.' % (au, title, ", ".join(parts_list))
+
+    elif style == "chicago17":
+        if not authors: auth = "Unknown Author"
+        elif len(authors) == 1: auth = authors[0]
+        elif len(authors) <= 3: auth = "; ".join(authors)
+        else: auth = f"{authors[0]} et al."
+        vi  = f"{vol}" + (f", no. {issue}" if issue else "")
+        pg  = f": {pages}" if pages else ""
+        doi_link = f" https://doi.org/{doi}." if doi else ""
+        return f'{auth}. "{title}." *{journal or pub}* {vi} ({year}){pg}.{doi_link}'
+
+    elif style == "harvard":
+        if not authors: au = "Anon"
+        else:
+            parts = []
+            for a in authors:
+                sp = a.split(", ")
+                initials = "".join(n[0].upper()+"." for n in sp[1].split()) if len(sp)>1 else ""
+                parts.append(f"{sp[0]}, {initials}" if initials else sp[0])
+            au = " and ".join(parts) if len(parts)<=2 else f"{parts[0]} et al."
+        pg  = f", pp.{pages}" if pages else ""
+        vi  = f", {vol}({issue})" if vol and issue else (f", {vol}" if vol else "")
+        doi_link = f". Available at: https://doi.org/{doi}" if doi else ""
+        return f"{au} ({year}) '{title}', *{journal or pub}*{vi}{pg}{doi_link}."
+
+    elif style == "vancouver":
+        van_au = []
+        for a in authors[:6]:
+            sp = a.split(", ")
+            initials = "".join(n[0].upper() for n in sp[1].split()) if len(sp)>1 else ""
+            van_au.append(f"{sp[0]} {initials}" if initials else sp[0])
+        if len(authors) > 6: van_au.append("et al")
+        au  = ", ".join(van_au) + "." if van_au else "Unknown."
+        vi  = f";{vol}" + (f"({issue})" if issue else "")
+        pg  = f":{pages}" if pages else ""
+        doi_link = f" doi: {doi}" if doi else ""
+        return f"{au} {title}. {journal or pub}. {year}{vi}{pg}.{doi_link}"
+
+    elif style == "ieee":
+        ieee_au = []
+        for a in authors:
+            sp = a.split(", ")
+            initials = "".join(n[0].upper()+"." for n in sp[1].split()) if len(sp)>1 else ""
+            ieee_au.append(f"{initials} {sp[0]}" if initials else sp[0])
+        au  = ", ".join(ieee_au[:6])
+        if len(authors) > 6: au += " et al."
+        vi  = f", vol. {vol}" if vol else ""
+        is_ = f", no. {issue}" if issue else ""
+        pg  = f", pp. {pages}" if pages else ""
+        doi_link = f", doi: {doi}" if doi else ""
+        return f'{au}, "{title}," *{journal or pub}*{vi}{is_}{pg}, {year}{doi_link}.'
+
+    return f"{', '.join(authors)} ({year}). {title}. {journal}."
+
+
+# ── Article summariser (via Groq) ──────────────────────────────────────────
+
+SUMMARISE_SYSTEM = """You are a research analyst. Extract structured information from the academic article text provided.
+Return a JSON object with exactly these keys:
+- "title": full article title
+- "authors": list of author names
+- "year": publication year (string)
+- "journal": journal or conference name
+- "doi": DOI if present (or empty string)
+- "main_objectives": 2-3 sentence summary of the research objectives
+- "methodology": 2-3 sentence description of methods used
+- "major_findings": 3-5 bullet points as a list of strings, each 1-2 sentences
+- "keywords": list of up to 6 keywords
+- "limitations": 1-2 sentence summary of limitations (or empty string)
+- "conclusion": 1-2 sentence overall conclusion
+Return ONLY valid JSON."""
+
+def summarise_article(api_key: str, model: str, text: str) -> dict:
+    """Summarise an academic article using Groq."""
+    # Truncate to ~3000 words to stay within context
+    words = text.split()
+    if len(words) > 3000:
+        text = " ".join(words[:3000]) + "\n[...truncated for processing...]"
+    user_msg = f"ARTICLE TEXT:\n\"\"\"\n{text}\n\"\"\""
+    resp = call_groq(api_key, model, SUMMARISE_SYSTEM, user_msg, max_tokens=1500, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw  = re.sub(r"\s*```$", "", raw)
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {"error": "Could not parse article summary.", "raw": raw}
+
+
+# ── PDF text extractor ─────────────────────────────────────────────────────
+
+def extract_pdf_text(uploaded_file) -> str:
+    """Extract text from an uploaded PDF file."""
+    if not PDF_OK:
+        return ""
+    try:
+        with pdfplumber.open(uploaded_file) as pdf:
+            pages = []
+            for page in pdf.pages[:40]:  # max 40 pages
+                text = page.extract_text()
+                if text:
+                    pages.append(text)
+        return "\n\n".join(pages)
+    except Exception as e:
+        return f"[PDF extraction error: {e}]"
+
+
+# ── Literature Review Excel exporter ───────────────────────────────────────
+
+def build_literature_excel(articles: list) -> bytes:
+    """Build a formatted Excel workbook from a list of article summary dicts."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Literature Review"
+
+    # Colour palette
+    C_HEADER_BG  = "1A1A2E"   # dark navy
+    C_HEADER_FG  = "C9A84C"   # gold
+    C_ALT_BG     = "FAF7F2"   # cream
+    C_WHITE      = "FFFFFF"
+    C_BORDER     = "D4C9B5"
+    C_ACCENT     = "4A7C59"   # sage green
+
+    thin_border = Border(
+        left=Side(style="thin", color=C_BORDER),
+        right=Side(style="thin", color=C_BORDER),
+        top=Side(style="thin", color=C_BORDER),
+        bottom=Side(style="thin", color=C_BORDER),
+    )
+    thick_bottom = Border(bottom=Side(style="medium", color=C_HEADER_BG))
+
+    # Title row
+    ws.merge_cells("A1:J1")
+    title_cell = ws["A1"]
+    title_cell.value = "Literature Review Summary — HumanizeAI · NYZTrade Analytics"
+    title_cell.font      = Font(name="Arial", size=14, bold=True, color=C_HEADER_FG)
+    title_cell.fill      = PatternFill("solid", fgColor=C_HEADER_BG)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 28
+
+    # Date row
+    ws.merge_cells("A2:J2")
+    date_cell = ws["A2"]
+    date_cell.value = f"Generated: {datetime.now().strftime('%d %B %Y, %H:%M')}"
+    date_cell.font  = Font(name="Arial", size=9, color="888888")
+    date_cell.alignment = Alignment(horizontal="right")
+    ws.row_dimensions[2].height = 16
+
+    # Column headers
+    headers = ["#", "Title", "Authors", "Year", "Journal / Source",
+               "Main Objectives", "Methodology", "Major Findings",
+               "Keywords", "DOI / URL"]
+    col_widths = [4, 35, 25, 6, 25, 40, 35, 50, 25, 30]
+
+    for col_idx, (hdr, width) in enumerate(zip(headers, col_widths), start=1):
+        cell = ws.cell(row=3, column=col_idx)
+        cell.value     = hdr
+        cell.font      = Font(name="Arial", size=10, bold=True, color=C_WHITE)
+        cell.fill      = PatternFill("solid", fgColor=C_ACCENT)
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=True)
+        cell.border    = thin_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    ws.row_dimensions[3].height = 22
+
+    # Data rows
+    for row_num, art in enumerate(articles, start=1):
+        row_idx   = row_num + 3
+        bg_color  = C_WHITE if row_num % 2 == 0 else C_ALT_BG
+        row_fill  = PatternFill("solid", fgColor=bg_color)
+
+        findings = art.get("major_findings", [])
+        if isinstance(findings, list):
+            findings_str = "\n".join(f"• {f}" for f in findings)
+        else:
+            findings_str = str(findings)
+
+        authors = art.get("authors", [])
+        if isinstance(authors, list):
+            authors_str = "; ".join(authors)
+        else:
+            authors_str = str(authors)
+
+        keywords = art.get("keywords", [])
+        kw_str = "; ".join(keywords) if isinstance(keywords, list) else str(keywords)
+
+        doi = art.get("doi", "") or ""
+        url_val = f"https://doi.org/{doi}" if doi else art.get("url","")
+
+        values = [
+            row_num,
+            art.get("title",""),
+            authors_str,
+            art.get("year",""),
+            art.get("journal",""),
+            art.get("main_objectives",""),
+            art.get("methodology",""),
+            findings_str,
+            kw_str,
+            url_val,
+        ]
+
+        for col_idx, val in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.value     = val
+            cell.fill      = row_fill
+            cell.border    = thin_border
+            cell.alignment = Alignment(vertical="top", wrap_text=True,
+                                       horizontal="center" if col_idx in (1,4) else "left")
+            cell.font      = Font(name="Arial", size=9)
+            if col_idx == 1:
+                cell.font = Font(name="Arial", size=9, bold=True, color=C_ACCENT)
+            if col_idx == 2:
+                cell.font = Font(name="Arial", size=9, bold=True, color=C_HEADER_BG)
+            if col_idx == 4:
+                cell.font = Font(name="Arial", size=9, bold=True)
+
+        ws.row_dimensions[row_idx].height = max(60, 15 * len(findings_str.split("\n")))
+
+    # Freeze header rows
+    ws.freeze_panes = "A4"
+
+    # Auto-filter
+    ws.auto_filter.ref = f"A3:J{3 + len(articles)}"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG & CSS
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -428,14 +793,15 @@ if st.session_state.show_admin:
         st.markdown("**To set permanently on Streamlit Cloud:**")
         st.code('''# In Streamlit Cloud → Settings → Secrets:
 GROQ_API_KEY = "gsk_your_key_here"
-ADMIN_PASSWORD = "your_admin_password"''', language="toml")
+ADMIN_PASSWORD = "your_admin_password"
+# pdfplumber and openpyxl are needed for Research Tools''', language="toml")
 
     with adm_tab2:
         st.markdown('<div class="card-title">📊 App Info</div>', unsafe_allow_html=True)
         info_items = [
-            ("Version", "v5.4 · NYZTrade"),
+            ("Version", "v6.0 · NYZTrade"),
             ("Mode", "Single-user · No login required"),
-            ("Tools", "Humanizer · Paraphraser · Grammar Checker"),
+            ("Tools", "Humanizer · Paraphraser · Grammar Checker · Research Tools"),
             ("Backend", "Groq API (streaming)"),
             ("Models", ", ".join(GROQ_MODELS.keys())),
             ("Max Words/Session", "Unlimited"),
@@ -497,13 +863,13 @@ with st.sidebar:
 # ── HERO ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v5.4 · NYZTrade</div>
+  <div class="hero-badge">v6.0 · NYZTrade</div>
   <div class="hero-title">HumanizeAI</div>
-  <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Ollama & Groq · 8-dimension humanness scoring</div>
+  <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Research Tools · 8-dimension scoring</div>
 </div>""", unsafe_allow_html=True)
 
 # ── TABS ───────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["✍️  Humanizer", "🔄  Paraphraser", "✅  Grammar Checker"])
+tab1, tab2, tab3, tab4 = st.tabs(["✍️  Humanizer", "🔄  Paraphraser", "✅  Grammar Checker", "🔬  Research Tools"])
 scores_in = {}
 scores_out = {}
 
@@ -727,6 +1093,397 @@ with tab3:
                     st.session_state.grammar_issues=result.get("issues",[])
                     st.rerun()
                 except Exception as e: st.error(f"❌ {e}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — RESEARCH TOOLS
+# ══════════════════════════════════════════════════════════════════════════════
+with tab4:
+    r_tab1, r_tab2, r_tab3 = st.tabs([
+        "📖 Citation Manager",
+        "📄 Article Summariser",
+        "📚 Literature Review"
+    ])
+
+    # ════════════════════════════════════════════════════════════════════════
+    # R-TAB 1 — CITATION MANAGER
+    # ════════════════════════════════════════════════════════════════════════
+    with r_tab1:
+        st.markdown('<div class="card-title">📖 Citation Manager</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#5a6a7a;font-size:0.88rem;">Enter a DOI or DOI URL to fetch metadata and generate a formatted citation.</p>', unsafe_allow_html=True)
+
+        ci_col1, ci_col2 = st.columns([3, 1])
+        with ci_col1:
+            doi_input = st.text_input(
+                "DOI or URL",
+                placeholder="e.g.  10.1016/j.jfineco.2021.01.004  or  https://doi.org/...",
+                label_visibility="collapsed", key="doi_input"
+            )
+        with ci_col2:
+            cite_style = st.selectbox("Style", list(CITATION_STYLES.keys()),
+                                       label_visibility="collapsed", key="cite_style")
+
+        fetch_btn = st.button("🔍 Fetch & Generate Citation", type="primary",
+                              disabled=(not doi_input.strip()), key="fetch_cite")
+
+        if "citation_meta"  not in st.session_state: st.session_state.citation_meta  = {}
+        if "citation_text"  not in st.session_state: st.session_state.citation_text  = ""
+        if "all_citations"  not in st.session_state: st.session_state.all_citations  = []
+
+        if fetch_btn and doi_input.strip():
+            with st.spinner("Fetching metadata from CrossRef…"):
+                meta = fetch_doi_metadata(doi_input.strip())
+                if "error" in meta:
+                    st.error(f"❌ {meta['error']} — Check your DOI or internet connection.")
+                else:
+                    st.session_state.citation_meta = meta
+                    st.session_state.citation_text = format_citation(meta, CITATION_STYLES[cite_style])
+                    st.rerun()
+
+        # Re-format if style changes without re-fetching
+        if st.session_state.citation_meta and not fetch_btn:
+            st.session_state.citation_text = format_citation(
+                st.session_state.citation_meta, CITATION_STYLES[cite_style]
+            )
+
+        meta = st.session_state.citation_meta
+        cit  = st.session_state.citation_text
+
+        if meta and cit:
+            # Metadata card
+            import html as _html
+            st.markdown('<p style="color:#c9a84c;font-weight:700;margin-top:1rem;">📋 Article Metadata</p>', unsafe_allow_html=True)
+            cols_meta = st.columns(3)
+            meta_items = [
+                ("Title",   meta.get("title","—")[:80]+"…" if len(meta.get("title",""))>80 else meta.get("title","—")),
+                ("Authors", "; ".join(meta.get("authors",[]))[:70] or "—"),
+                ("Year",    meta.get("year","—")),
+                ("Journal", meta.get("journal","—")[:60] or "—"),
+                ("Volume",  meta.get("volume","—") or "—"),
+                ("Pages",   meta.get("pages","—") or "—"),
+            ]
+            for i, (label, val) in enumerate(meta_items):
+                with cols_meta[i % 3]:
+                    st.markdown(f"""<div style="background:#f5f0e8;border:1px solid #d4c9b5;
+                         border-radius:8px;padding:0.6rem 0.8rem;margin-bottom:0.5rem;">
+                      <div style="font-size:0.68rem;color:#9a8a7a;text-transform:uppercase;letter-spacing:0.8px;">{label}</div>
+                      <div style="font-size:0.85rem;font-weight:600;color:#1a1a2e;margin-top:0.2rem;">{_html.escape(str(val))}</div>
+                    </div>""", unsafe_allow_html=True)
+
+            # Citation output
+            st.markdown(f'<p style="color:#c9a84c;font-weight:700;margin-top:0.5rem;">{cite_style} Citation</p>', unsafe_allow_html=True)
+            # Render citation in a readable box
+            st.markdown(f"""<div style="background:white;border:1.5px solid #c9a84c;border-radius:10px;
+                 padding:1rem 1.3rem;font-family:'DM Sans',sans-serif;font-size:0.92rem;
+                 line-height:1.8;color:#1a1a2e;white-space:pre-wrap;">{_html.escape(cit)}</div>""",
+                unsafe_allow_html=True)
+
+            c_copy, c_add = st.columns([1,1])
+            with c_copy:
+                make_copy_btn("citation-out", cit, "📋 Copy Citation")
+            with c_add:
+                if st.button("➕ Add to List", use_container_width=True, key="add_to_list"):
+                    entry = dict(meta)
+                    entry["citation"] = cit
+                    entry["style"]    = cite_style
+                    st.session_state.all_citations.append(entry)
+                    st.success(f"✅ Added! ({len(st.session_state.all_citations)} in list)")
+
+        # Citation list
+        if st.session_state.all_citations:
+            st.markdown("---")
+            st.markdown(f'<p style="color:#c9a84c;font-weight:700;">📋 Citation List ({len(st.session_state.all_citations)} entries)</p>', unsafe_allow_html=True)
+
+            # Style selector for re-formatting all
+            new_style_all = st.selectbox("Re-format all as:", list(CITATION_STYLES.keys()),
+                                          key="bulk_style")
+            all_text = ""
+            for i, entry in enumerate(st.session_state.all_citations, 1):
+                formatted = format_citation(entry, CITATION_STYLES[new_style_all])
+                all_text += f"{i}. {formatted}\n\n"
+                st.markdown(f"""<div style="background:white;border:1px solid #d4c9b5;border-radius:8px;
+                     padding:0.7rem 1rem;margin-bottom:0.4rem;font-size:0.85rem;color:#1a1a2e;
+                     line-height:1.7;">
+                  <span style="color:#c9a84c;font-weight:700;">{i}.</span> {_html.escape(formatted)}
+                </div>""", unsafe_allow_html=True)
+
+            bc1, bc2 = st.columns([1,1])
+            with bc1:
+                make_copy_btn("all-citations", all_text, "📋 Copy All Citations")
+            with bc2:
+                if st.button("🗑️ Clear List", use_container_width=True, key="clear_citations"):
+                    st.session_state.all_citations = []
+                    st.rerun()
+
+            st.download_button(
+                "⬇️ Download Citations (.txt)",
+                data=all_text, file_name="citations.txt",
+                mime="text/plain", use_container_width=True
+            )
+
+    # ════════════════════════════════════════════════════════════════════════
+    # R-TAB 2 — ARTICLE SUMMARISER
+    # ════════════════════════════════════════════════════════════════════════
+    with r_tab2:
+        st.markdown('<div class="card-title">📄 Research Article Summariser</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#5a6a7a;font-size:0.88rem;">Paste article text or upload a PDF to extract: Title · Authors · Year · Objectives · Methodology · Major Findings</p>', unsafe_allow_html=True)
+
+        if "article_summary" not in st.session_state: st.session_state.article_summary = {}
+
+        src_tab_a, src_tab_b = st.tabs(["✏️ Paste Text", "📎 Upload PDF"])
+
+        with src_tab_a:
+            article_text = st.text_area("Article text", height=250,
+                placeholder="Paste the full abstract or body of the research article…",
+                label_visibility="collapsed", key="article_paste")
+            summ_btn_a = st.button("🔬 Summarise Article", type="primary",
+                                    disabled=(not article_text.strip() or not groq_key),
+                                    key="summ_paste")
+            if not groq_key:
+                st.caption("🔑 Add Groq API key in sidebar to enable.")
+
+        with src_tab_b:
+            if PDF_OK:
+                uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"],
+                                                 label_visibility="collapsed", key="article_pdf")
+                summ_btn_b = st.button("🔬 Summarise PDF", type="primary",
+                                        disabled=(uploaded_pdf is None or not groq_key),
+                                        key="summ_pdf")
+                if not groq_key:
+                    st.caption("🔑 Add Groq API key in sidebar to enable.")
+            else:
+                st.warning("pdfplumber not installed. Add to requirements.txt.")
+                uploaded_pdf = None
+                summ_btn_b  = False
+
+        # Process
+        if (summ_btn_a and article_text.strip()) or (summ_btn_b and uploaded_pdf):
+            text_to_summarise = ""
+            if summ_btn_b and uploaded_pdf:
+                with st.spinner("Extracting PDF text…"):
+                    text_to_summarise = extract_pdf_text(uploaded_pdf)
+                if text_to_summarise.startswith("[PDF extraction error"):
+                    st.error(text_to_summarise)
+                    text_to_summarise = ""
+            else:
+                text_to_summarise = article_text
+
+            if text_to_summarise and groq_key:
+                with st.spinner("Analysing article with AI…"):
+                    try:
+                        summary = summarise_article(groq_key, model_choice, text_to_summarise)
+                        st.session_state.article_summary = summary
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+        # Display summary
+        s = st.session_state.article_summary
+        if s and "error" not in s:
+            import html as _html
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Header info
+            hc1, hc2 = st.columns([3, 1])
+            with hc1:
+                st.markdown(f"""<div style="background:white;border:1.5px solid #c9a84c;
+                     border-radius:12px;padding:1.2rem 1.5rem;">
+                  <div style="font-family:'Playfair Display',serif;font-size:1.1rem;
+                       font-weight:700;color:#1a1a2e;margin-bottom:0.5rem;">
+                    {_html.escape(s.get("title","Unknown Title"))}</div>
+                  <div style="font-size:0.85rem;color:#5a6a7a;">
+                    <b>Authors:</b> {_html.escape(", ".join(s.get("authors",[])) or "—")}</div>
+                  <div style="font-size:0.85rem;color:#5a6a7a;margin-top:0.2rem;">
+                    <b>Journal:</b> {_html.escape(s.get("journal","—"))} &nbsp;|&nbsp;
+                    <b>Year:</b> {_html.escape(s.get("year","—"))}
+                    {(" &nbsp;|&nbsp; <b>DOI:</b> " + _html.escape(s.get("doi",""))) if s.get("doi") else ""}
+                  </div>
+                </div>""", unsafe_allow_html=True)
+            with hc2:
+                kw = s.get("keywords",[])
+                if kw:
+                    kw_html = " ".join(f'<span style="background:#f5f0e8;border:1px solid #d4c9b5;border-radius:12px;padding:0.2rem 0.6rem;font-size:0.72rem;color:#5a6a7a;">{_html.escape(k)}</span>' for k in kw)
+                    st.markdown(f'<div style="line-height:2.2;">{kw_html}</div>', unsafe_allow_html=True)
+
+            # Three info boxes
+            bx1, bx2, bx3 = st.columns(3)
+            box_items = [
+                ("🎯 Main Objectives", "main_objectives", "#1a3a2e", "#6fcf97"),
+                ("⚗️ Methodology",     "methodology",     "#1a0a2e", "#b87ae8"),
+                ("🔍 Limitations",     "limitations",     "#2d1a0a", "#e8a87a"),
+            ]
+            for col, (title_b, key_b, bg_b, ac_b) in zip([bx1,bx2,bx3], box_items):
+                val = s.get(key_b,"") or "Not specified."
+                col.markdown(f"""<div style="background:{bg_b};border:1px solid {ac_b}44;
+                     border-radius:10px;padding:1rem;height:160px;overflow-y:auto;">
+                  <div style="font-size:0.78rem;font-weight:700;color:{ac_b};
+                       text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.5rem;">{title_b}</div>
+                  <div style="font-size:0.85rem;color:rgba(255,255,255,0.85);line-height:1.6;">
+                    {_html.escape(str(val))}</div>
+                </div>""", unsafe_allow_html=True)
+
+            # Major findings
+            st.markdown('<p style="color:#c9a84c;font-weight:700;margin-top:1rem;">📊 Major Findings</p>', unsafe_allow_html=True)
+            findings = s.get("major_findings",[])
+            if isinstance(findings, list):
+                for i, f in enumerate(findings, 1):
+                    st.markdown(f"""<div style="background:white;border-left:4px solid #c9a84c;
+                         border-radius:0 8px 8px 0;padding:0.6rem 1rem;margin-bottom:0.4rem;
+                         font-size:0.88rem;color:#1a1a2e;line-height:1.6;">
+                      <b style="color:#c9a84c;">{i}.</b> {_html.escape(str(f))}
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div style="font-size:0.88rem;color:#1a1a2e;">{_html.escape(str(findings))}</div>', unsafe_allow_html=True)
+
+            # Conclusion
+            if s.get("conclusion"):
+                st.markdown(f"""<div style="background:linear-gradient(135deg,#1a3a2e,#2d4a1e);
+                     border-radius:10px;padding:1rem 1.3rem;margin-top:0.5rem;">
+                  <div style="font-size:0.75rem;font-weight:700;color:#6fcf97;
+                       text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.4rem;">
+                    ✅ Conclusion</div>
+                  <div style="font-size:0.88rem;color:rgba(255,255,255,0.85);line-height:1.6;">
+                    {_html.escape(s.get("conclusion",""))}</div>
+                </div>""", unsafe_allow_html=True)
+
+            # Actions
+            ac1, ac2 = st.columns([1,1])
+            summary_text = f"""ARTICLE SUMMARY
+{'='*50}
+Title:   {s.get("title","")}
+Authors: {", ".join(s.get("authors",[]))}
+Year:    {s.get("year","")}
+Journal: {s.get("journal","")}
+DOI:     {s.get("doi","")}
+
+MAIN OBJECTIVES:
+{s.get("main_objectives","")}
+
+METHODOLOGY:
+{s.get("methodology","")}
+
+MAJOR FINDINGS:
+""" + "\n".join(f"• {f}" for f in (s.get("major_findings",[]) if isinstance(s.get("major_findings",[]),list) else [s.get("major_findings","")])) + f"""
+
+LIMITATIONS:
+{s.get("limitations","")}
+
+CONCLUSION:
+{s.get("conclusion","")}
+
+KEYWORDS: {", ".join(s.get("keywords",[]))}
+"""
+            with ac1:
+                make_copy_btn("article-summary", summary_text, "📋 Copy Summary")
+            with ac2:
+                # Add to literature review
+                if st.button("➕ Add to Literature Review", use_container_width=True, key="add_to_lit"):
+                    if "lit_review_articles" not in st.session_state:
+                        st.session_state.lit_review_articles = []
+                    st.session_state.lit_review_articles.append(dict(s))
+                    st.success(f"✅ Added to Literature Review ({len(st.session_state.lit_review_articles)} articles)")
+
+        elif s and "error" in s:
+            st.error(f"❌ {s['error']}")
+            if s.get("raw"):
+                with st.expander("Raw response"):
+                    st.code(s["raw"])
+
+    # ════════════════════════════════════════════════════════════════════════
+    # R-TAB 3 — LITERATURE REVIEW
+    # ════════════════════════════════════════════════════════════════════════
+    with r_tab3:
+        st.markdown('<div class="card-title">📚 Literature Review Manager</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#5a6a7a;font-size:0.88rem;">Upload multiple PDFs or add articles from the Summariser tab. Download a comprehensive literature review table as Excel.</p>', unsafe_allow_html=True)
+
+        if "lit_review_articles" not in st.session_state:
+            st.session_state.lit_review_articles = []
+
+        # Bulk PDF upload
+        st.markdown('<p style="color:#c9a84c;font-weight:700;">📎 Bulk Upload PDFs</p>', unsafe_allow_html=True)
+        if PDF_OK:
+            uploaded_pdfs = st.file_uploader("Upload PDFs", type=["pdf"],
+                                              accept_multiple_files=True,
+                                              label_visibility="collapsed", key="lit_pdfs")
+            if uploaded_pdfs and groq_key:
+                if st.button(f"🔬 Process {len(uploaded_pdfs)} PDF(s)", type="primary", key="process_pdfs"):
+                    progress = st.progress(0)
+                    for i, pdf_file in enumerate(uploaded_pdfs):
+                        st.markdown(f'<span class="wc-badge">Processing: {pdf_file.name}…</span>', unsafe_allow_html=True)
+                        text = extract_pdf_text(pdf_file)
+                        if not text.startswith("[PDF"):
+                            try:
+                                summary = summarise_article(groq_key, model_choice, text)
+                                if "error" not in summary:
+                                    # Tag with filename if no title
+                                    if not summary.get("title"):
+                                        summary["title"] = pdf_file.name.replace(".pdf","")
+                                    st.session_state.lit_review_articles.append(summary)
+                            except Exception as e:
+                                st.warning(f"⚠️ Could not process {pdf_file.name}: {e}")
+                        progress.progress((i+1)/len(uploaded_pdfs))
+                    st.success(f"✅ Processed {len(uploaded_pdfs)} article(s). Total in review: {len(st.session_state.lit_review_articles)}")
+                    st.rerun()
+            elif uploaded_pdfs and not groq_key:
+                st.warning("🔑 Add Groq API key in sidebar to process PDFs.")
+        else:
+            st.warning("Install pdfplumber: add `pdfplumber` to requirements.txt")
+
+        st.markdown("---")
+
+        # Current articles list
+        arts = st.session_state.lit_review_articles
+        if arts:
+            st.markdown(f'<p style="color:#c9a84c;font-weight:700;">📋 Articles in Review ({len(arts)})</p>', unsafe_allow_html=True)
+
+            for i, art in enumerate(arts):
+                import html as _html
+                with st.expander(f"{i+1}. {art.get('title','Untitled')[:70]}… ({art.get('year','?')})"):
+                    lc1, lc2, lc3 = st.columns([3,2,1])
+                    with lc1:
+                        st.markdown(f"""
+                        **Authors:** {_html.escape(", ".join(art.get("authors",[]))[:80])}
+                        **Journal:** {_html.escape(art.get("journal","—"))}
+                        **DOI:** {_html.escape(art.get("doi","—") or "—")}
+                        """)
+                    with lc2:
+                        st.markdown(f"**Objectives:** {art.get('main_objectives','')[:120]}…")
+                    with lc3:
+                        if st.button("🗑️ Remove", key=f"rm_art_{i}"):
+                            st.session_state.lit_review_articles.pop(i)
+                            st.rerun()
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Download Excel
+            if XLSX_OK:
+                if st.button("📊 Generate Literature Review Excel", type="primary",
+                             use_container_width=True, key="gen_excel"):
+                    with st.spinner("Building Excel workbook…"):
+                        excel_bytes = build_literature_excel(arts)
+                    fname = f"literature_review_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                    st.download_button(
+                        label="⬇️  Download Literature Review (.xlsx)",
+                        data=excel_bytes,
+                        file_name=fname,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="dl_excel"
+                    )
+            else:
+                st.warning("Install openpyxl: add `openpyxl` to requirements.txt")
+
+            if st.button("🗑️ Clear All Articles", use_container_width=True, key="clear_lit"):
+                st.session_state.lit_review_articles = []
+                st.rerun()
+
+        else:
+            st.markdown("""<div style="background:white;border:1.5px dashed #d4c9b5;border-radius:10px;
+                 min-height:200px;display:flex;align-items:center;justify-content:center;
+                 flex-direction:column;gap:0.5rem;color:#9a8a7a;">
+              <div style="font-size:2rem;">📚</div>
+              <div style="font-size:0.9rem;">No articles yet — upload PDFs or add from the Summariser tab</div>
+            </div>""", unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # COMPARISON PANEL
