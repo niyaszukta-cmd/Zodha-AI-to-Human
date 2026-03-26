@@ -71,7 +71,8 @@ def _sent_tokenize(text):
 def _word_tokenize(text):
     return re.findall(r'\b[a-zA-Z]+\b', text.lower())
 
-def compute_scores(text):
+def compute_scores(text, style="Conversational"):
+    """Compute humanness scores with style-aware weighting."""
     if not text or not text.strip(): return {}
     sentences    = _sent_tokenize(text)
     words_alpha  = _word_tokenize(text)
@@ -80,16 +81,19 @@ def compute_scores(text):
     flesch       = _flesch_reading_ease(text)
     unique_words = set(words_alpha)
     ttr          = (len(unique_words)/word_count*100) if word_count > 0 else 0
+
     sent_lengths = [len(_word_tokenize(s)) for s in sentences]
     sl_variation = 0.0
     if len(sent_lengths) > 1:
         mean_sl = sum(sent_lengths)/len(sent_lengths)
         sl_variation = min(100, math.sqrt(sum((l-mean_sl)**2 for l in sent_lengths)/len(sent_lengths))*5)
     avg_sent_len = word_count/sent_count
-    burstiness   = 0.0
+
+    burstiness = 0.0
     if len(sent_lengths) > 2:
         diffs = [abs(sent_lengths[i]-sent_lengths[i-1]) for i in range(1, len(sent_lengths))]
         burstiness = min(100,(sum(diffs)/len(diffs))*4)
+
     contractions = len(re.findall(
         r"\b(i'm|you're|he's|she's|it's|we're|they're|i've|you've|we've|they've|"
         r"i'd|you'd|he'd|she'd|we'd|they'd|i'll|you'll|he'll|she'll|we'll|they'll|"
@@ -97,26 +101,70 @@ def compute_scores(text):
         r"couldn't|shouldn't|haven't|hasn't|hadn't|that's|there's|here's|let's)\b",
         text.lower()))
     contraction_score = min(100,(contractions/max(sent_count,1))*40)
+
     first_person  = len(re.findall(r'\b(i|me|my|myself|we|our|us)\b', text.lower()))
     fp_score      = min(100,(first_person/max(word_count,1))*500)
+
     passive_count = len(re.findall(r'\b(is|are|was|were|be|been|being)\s+\w+ed\b', text.lower()))
     passive_score = max(0, 100-(passive_count/max(sent_count,1))*60)
-    transition_words = ['however','therefore','moreover','furthermore','although',
+
+    # Extended transition words — includes academic discourse markers
+    transition_words = [
+        'however','therefore','moreover','furthermore','although',
         'despite','meanwhile','consequently','additionally','nevertheless',
         'on the other hand','in contrast','for instance','in other words',
-        'as a result','similarly','in fact','of course','after all']
-    transition_score = min(100, sum(1 for t in transition_words if t in text.lower())*8)
-    grade     = _flesch_kincaid_grade(text)
-    humanness = round(min(100,max(0,
-        flesch*0.20 + ttr*0.18 + sl_variation*0.15 + burstiness*0.12 +
-        contraction_score*0.10 + fp_score*0.08 + passive_score*0.10 + transition_score*0.07
-    )),1)
+        'as a result','similarly','in fact','of course','after all',
+        'notably','crucially','significantly','interestingly','importantly',
+        'that said','more importantly','in practice','taken together',
+        'what is striking','perhaps most','it appears','the evidence suggests',
+        'one may argue','this suggests','this implies','this indicates'
+    ]
+    transitions      = sum(1 for t in transition_words if t in text.lower())
+    transition_score = min(100, transitions * 6)
+
+    # Sentence opener variety (human writers vary their openers)
+    if sent_lengths:
+        openers = []
+        for s in sentences[:min(10, len(sentences))]:
+            words = _word_tokenize(s)
+            if words: openers.append(words[0])
+        unique_openers = len(set(openers))
+        opener_variety = min(100, (unique_openers / max(len(openers), 1)) * 100)
+    else:
+        opener_variety = 50
+
+    grade = _flesch_kincaid_grade(text)
+
+    # ── Style-aware weighting ──────────────────────────────────────────────
+    # Academic text has no contractions/first-person by design — don't penalise
+    if style in ("Academic", "Professional"):
+        humanness = round(min(100, max(0,
+            sl_variation     * 0.28 +   # most important for academic
+            burstiness       * 0.22 +
+            passive_score    * 0.15 +
+            transition_score * 0.15 +
+            ttr              * 0.10 +
+            opener_variety   * 0.10
+        )), 1)
+    else:
+        humanness = round(min(100, max(0,
+            sl_variation      * 0.20 +
+            burstiness        * 0.18 +
+            ttr               * 0.12 +
+            contraction_score * 0.12 +
+            transition_score  * 0.12 +
+            passive_score     * 0.10 +
+            opener_variety    * 0.10 +
+            fp_score          * 0.06
+        )), 1)
+
     return {"humanness":humanness,"flesch":round(flesch,1),"ttr":round(ttr,1),
             "sl_variation":round(sl_variation,1),"burstiness":round(burstiness,1),
             "contraction_score":round(contraction_score,1),"passive_score":round(passive_score,1),
             "transition_score":round(transition_score,1),"word_count":word_count,
             "sent_count":sent_count,"avg_sent_len":round(avg_sent_len,1),
-            "grade_level":round(grade,1),"unique_words":len(unique_words)}
+            "grade_level":round(grade,1),"unique_words":len(unique_words),
+            "opener_variety":round(opener_variety,1)}
 
 def score_color(score):
     if score>=75:   return("#1a3a2e","#6fcf97","Excellent")
@@ -165,56 +213,120 @@ def make_copy_btn(copy_id, text, label="📋 Copy", color="#c9a84c", bg="#1a1a2e
 # AI PROMPTS
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── Anti-AI pattern list injected into every prompt ─────────────────────
+_AI_PATTERNS_TO_AVOID = """
+ANTI-AI CHECKLIST — your rewrite MUST avoid ALL of these:
+✗ Starting multiple sentences with "The [noun] [verb]" pattern
+✗ Consecutive sentences of nearly identical length
+✗ Transitions that are ONLY: "Additionally," "Furthermore," "Moreover," "In conclusion,"
+✗ Passive constructions: "It is important to note that", "It should be mentioned that"
+✗ Hollow openers: "In today's world", "In recent years", "It is worth noting"
+✗ Robotic listing: sentences that all follow Subject+Verb+Object+Object pattern
+✗ Zero variation in clause complexity across a paragraph
+✗ Repeating the same key noun in every sentence instead of using pronouns/synonyms
+"""
+
+# ── Style-specific few-shot transformation examples ───────────────────────
+_FEW_SHOT = {
+    "Academic": """
+TRANSFORMATION EXAMPLE (Academic):
+BEFORE (AI-like): "The study examines the impact of climate change on biodiversity. The research uses quantitative methods. The findings show significant correlations. The results indicate that action is needed."
+AFTER (Human scholar): "This study examines how climate change reshapes patterns of biodiversity across multiple ecological scales. Employing a quantitative framework — specifically regression-based modelling of species distribution data — the analysis reveals a statistically significant correlation between temperature anomalies and species range contraction. What emerges from these findings is a sobering picture: without substantive policy intervention, biodiversity loss may accelerate well beyond current projections."
+KEY CHANGES: Mixed sentence lengths (6→25→32→20 words), hedging language, complex subordinate clauses, discourse marker "What emerges", active voice "the analysis reveals".
+""",
+    "Conversational": """
+TRANSFORMATION EXAMPLE (Conversational):
+BEFORE (AI-like): "Artificial intelligence is transforming many industries. It is being used in healthcare and finance. The technology enables better decision making. This has many benefits for organizations."
+AFTER (Human voice): "AI is reshaping entire industries — and honestly, it's happening faster than most people expected. In healthcare, it's already helping doctors spot patterns that would take humans hours to find. Finance? Same story. What's really interesting, though, is how this changes decision-making at every level of an organization. The benefits aren't just operational. They're strategic."
+KEY CHANGES: Contractions (it's, it's), em-dash for rhythm, rhetorical question, short punchy sentences mixed with longer ones, first-person asides.
+""",
+    "Professional": """
+TRANSFORMATION EXAMPLE (Professional):
+BEFORE (AI-like): "The company implemented new strategies. The strategies improved performance. The results were positive. The organization benefited from these changes."
+AFTER (Professional voice): "Following a strategic repositioning in Q3, the company recorded measurable performance gains across three key divisions. That said, the picture is more nuanced than headline figures suggest. Margin improvement came largely from cost discipline rather than revenue growth — a distinction that matters for long-term sustainability. The organisation has benefited, but the harder work of building durable competitive advantage lies ahead."
+KEY CHANGES: Specific detail, "That said" transition, analytical caveat, em-dash, varied sentence structure, no consecutive same-pattern sentences.
+""",
+    "Journalistic": """
+TRANSFORMATION EXAMPLE (Journalistic):
+BEFORE (AI-like): "The economy is experiencing significant changes. Many factors are contributing to these changes. Experts believe this will continue. There are both positive and negative effects."
+AFTER (Journalist voice): "The economy is shifting — and not quietly. Rising interest rates, supply chain restructuring, and an AI-driven productivity surge are converging in ways that few forecasters predicted even two years ago. The result? A labour market that defies easy categorisation. For workers in some sectors, conditions have never been better. For others, the outlook is considerably bleaker."
+KEY CHANGES: Em-dash hook, specific factors listed, rhetorical question "The result?", short paragraph for punch, contrasting final sentences.
+""",
+    "Creative": """
+TRANSFORMATION EXAMPLE (Creative):
+BEFORE (AI-like): "The city was busy with many people. There was a lot of noise. The streets were crowded. It was an interesting place to be."
+AFTER (Creative voice): "The city breathed with a kind of restless energy — bodies pressed close, voices layering over each other in a dozen languages. Horns. Laughter. Someone arguing in a doorway. You didn't observe this place so much as get pulled into it, swept along by currents you couldn't quite name. Interesting wasn't the word. Alive was closer."
+KEY CHANGES: Metaphor (city breathed), fragment sentences for rhythm, sensory details, second-person pull, single-word paragraphs for emphasis.
+""",
+}
+
 STYLE_PROMPTS = {
     "Academic": (
-        "You are a senior academic editor at a Tier-1 research journal with 20 years of experience. "
-        "Rewrite so it reads as authored by a distinguished human scholar — NOT generated by AI. "
-        "\n\nSTRICT ACADEMIC REGISTER (non-negotiable):"
-        "\n• NEVER use contractions (it's→it is, don't→do not, we've→we have). "
-        "\n• NEVER use informal phrases, slang, or casual asides. "
-        "\n• Maintain formal scholarly register throughout. "
-        "\n\nHUMANNESS TECHNIQUES:"
-        "\n• Vary sentence length: concise assertions (10-15 words) mixed with complex sentences (30-45 words). "
-        "\n• Use scholarly hedging: 'the evidence suggests', 'it appears that', 'one may argue'. "
-        "\n• Insert discourse markers: 'Notably,', 'Crucially,', 'Of particular significance is'. "
-        "\n• Use precise domain-specific vocabulary — do not simplify technical terms. "
-        "\n• Active constructions: 'The analysis reveals' not 'It was revealed by the analysis'. "
-        "\n\nPreserve 100% of original meaning, all data, all citations, and all technical terminology."
+        "You are a world-class academic editor who has spent 20 years editing for Nature, The Lancet, "
+        "and top economics journals. Your singular task: transform AI-generated academic text into prose "
+        "that reads unmistakably like a distinguished human scholar wrote it. "
+        "\n\nCRITICAL REGISTER RULES:"
+        "\n• ZERO contractions — it is, do not, we have, cannot, should not, does not"
+        "\n• ZERO informal phrases — no casual asides, no colloquialisms, no hedges like 'pretty much'"
+        "\n• Third person or formal first-person plural (we, the study, the analysis, the findings)"
+        "\n\nTRANSFORMATION TECHNIQUES that DRAMATICALLY increase humanness scores:"
+        "\n• SENTENCE RHYTHM: Ruthlessly vary length. Short (8-12 words) → long complex (32-45 words) → medium (18-22 words). Never 3 consecutive sentences of similar length."
+        "\n• SUBORDINATE CLAUSES: Build complex sentences with 'which', 'where', 'whose', 'although', 'despite', 'whereas', 'notwithstanding'"
+        "\n• SCHOLARLY HEDGING: 'the evidence suggests', 'it appears that', 'one may reasonably argue', 'the data indicate', 'this finding implies', 'tentatively', 'arguably'"
+        "\n• DISCOURSE ARCHITECTURE: 'Notably,', 'Crucially,', 'Of particular significance here is', 'What is striking is that', 'Perhaps most tellingly,', 'This finding warrants closer examination.'"
+        "\n• AVOID AI OPENERS: Never start sentences with 'The study shows', 'Research indicates', 'It is important' — vary your sentence openings completely"
+        "\n• ACTIVE CONSTRUCTIONS: 'The analysis reveals' not 'It is revealed by the analysis'; 'These findings challenge' not 'It is challenged by these findings'"
+        "\n• PARAGRAPH VARIATION: Some paragraphs 2-3 short punchy sentences making sharp claims. Others 4-5 sentences building a complex argument."
+        "\n\nPreserve 100% of original meaning, all numerical data, all citations, and all technical terminology."
     ),
     "Conversational": (
-        "Rewrite to sound like a knowledgeable person explaining naturally and engagingly. "
-        "\n• Use contractions freely: it's, don't, we've, can't, that's, they're. "
-        "\n• Alternate sentence lengths — short (4-8 words) for impact, longer for explanation. "
-        "\n• Use rhetorical questions: 'But why does this matter?' "
-        "\n• Add natural connectives: 'On top of that,', 'Here's the thing —'. "
-        "\n• Use first-person (I, we, you) to create connection. "
+        "You are transforming robotic AI text into natural, engaging human conversation. "
+        "Your goal: make this sound like an intelligent, knowledgeable person explaining something they genuinely care about. "
+        "\n\nTRANSFORMATION TECHNIQUES:"
+        "\n• CONTRACTIONS ARE MANDATORY: it's, don't, we've, can't, that's, they're, isn't, you'll, we're, I've — use them liberally"
+        "\n• SENTENCE RHYTHM SHOCK: Drop in 3-5 word sentences. Then follow with a long meandering one that builds and builds and develops a thought more fully than any AI would dare. Short. Long. Medium. Never uniform."
+        "\n• RHETORICAL QUESTIONS: 'But why does this matter?', 'So what does this actually mean?', 'And here's the thing —'"
+        "\n• NATURAL CONNECTORS: 'And honestly,', 'Here's the thing —', 'What's more,', 'On top of that,', 'And yet,', 'Which is exactly why'"
+        "\n• FIRST PERSON: Use I, we, you to create direct connection with the reader"
+        "\n• INFORMALITY MARKERS: Occasional em-dash —, ellipsis for trailing thought..., direct address 'you'"
+        "\n• FRAGMENT SENTENCES: Powerful. For emphasis. Like this."
         "\nPreserve all key facts and meaning."
     ),
     "Professional": (
-        "Rewrite as a senior professional writer — authoritative, confident, natural, never stiff. "
-        "\n• Avoid contractions in formal contexts (prefer 'does not' over 'doesn't'). "
-        "\n• Mix short declarative sentences with longer analytical ones. "
-        "\n• Active voice for 80%+ sentences. "
-        "\n• Deploy transitions: 'More importantly,', 'That said,', 'In practice,'. "
-        "\n• Vary paragraph length. "
+        "You are a principal at McKinsey who also writes for Harvard Business Review. "
+        "Transform this into polished, authoritative professional prose — confident and natural, never stiff or robotic. "
+        "\n\nTRANSFORMATION TECHNIQUES:"
+        "\n• SENTENCE CONTRAST: Alternate between short declarative punches (8-12 words) and longer analytical sentences (25-35 words) that add nuance"
+        "\n• ACTIVE POWER VOICE: 80%+ active voice. 'The data reveal' not 'It is revealed by the data'"
+        "\n• PROFESSIONAL TRANSITIONS: 'That said,', 'More importantly,', 'This matters because', 'The implications are clear:', 'In practice,', 'Taken together,', 'At its core,'"
+        "\n• ANALYTICAL CAVEATS: Add nuance — 'though the picture is more complex', 'a distinction worth drawing', 'the harder question is'"
+        "\n• PARAGRAPH PUNCH: Use a single short paragraph (1-2 sentences) for maximum impact on key points"
+        "\n• CONTRACTIONS: Spare but natural — it's appropriate in professional contexts, doesn't feel informal when used once per paragraph"
         "\nPreserve every key idea and fact."
     ),
     "Journalistic": (
-        "Rewrite as a senior writer at The Economist or The Atlantic. "
-        "\n• Open with a short punchy hook (8-12 words). "
-        "\n• Vary rhythm dramatically. Active voice throughout. "
-        "\n• Journalist transitions: 'The result?', 'Consider this:', 'Yet the picture is more complex.' "
-        "\n• Sparse contractions (Economist style). "
-        "\n• Create narrative momentum. "
-        "\nKeep all facts."
+        "You are a senior correspondent at The Economist with bylines in The Atlantic and Foreign Affairs. "
+        "Transform this into compelling journalistic prose — clear, authoritative, and impossible to stop reading. "
+        "\n\nTRANSFORMATION TECHNIQUES:"
+        "\n• HOOK MANDATORY: First sentence must be 8-12 words, punchy, and immediately compelling"
+        "\n• RHYTHM VARIATION: The Economist style — a long analytical sentence, then a short punchy one. Long. Short. Long, long. Short."
+        "\n• JOURNALIST'S TOOLKIT: 'The result?', 'Consider this:', 'Yet the picture is more complex.', 'This is not accidental.', 'The numbers tell an uncomfortable story.'"
+        "\n• SPECIFICITY: Replace vague language with concrete details, numbers, and named examples wherever possible"
+        "\n• CONTRASTING CLOSE: End paragraphs with a tension or a twist — something that makes the reader want to continue"
+        "\n• NARRATIVE MOMENTUM: Each sentence must pull the reader to the next. No dead sentences."
+        "\nKeep all facts and specific details."
     ),
     "Creative": (
-        "Transform into vivid expressive prose preserving all meaning. "
-        "\n• Striking sentence rhythm variation. "
-        "\n• Metaphor, analogy, sensory language where natural. "
-        "\n• Vary paragraph lengths — single-sentence paragraphs for punch. "
-        "\n• Selective contractions for natural voice. "
-        "\nPreserve all original ideas."
+        "You are a literary writer — imagine the style of Joan Didion, George Orwell, or David Foster Wallace. "
+        "Transform this into vivid, expressive prose that a reader would remember. "
+        "\n\nTRANSFORMATION TECHNIQUES:"
+        "\n• SENTENCE FRAGMENTS FOR IMPACT: Use them deliberately. Like this. For emphasis."
+        "\n• RHYTHM AS MUSIC: Short. Then a sentence that expands and flows and breathes, taking its time to move through an idea. Then short again."
+        "\n• SENSORY AND METAPHORIC LANGUAGE: Find the concrete image that carries the abstract idea. 'The economy breathed nervously' beats 'the economy was uncertain'."
+        "\n• PARAGRAPH AS UNIT: Single-sentence paragraphs for punching moments. Longer paragraphs for building atmosphere."
+        "\n• VOICE: Write as if the narrator has a distinct personality — curious, ironic, passionate, wry"
+        "\n• UNEXPECTED WORD CHOICES: Replace predictable adjectives with surprising but accurate ones"
+        "\nPreserve all original meaning and ideas."
     ),
 }
 
@@ -235,27 +347,111 @@ GRAMMAR_SYSTEM = (
 )
 
 INTENSITY_INSTRUCTIONS = {
-    "Light":    "Lightly edit for naturalness. Fix robotic phrases, add 2-3 varied sentence lengths and transitions. Keep 80% of original structure. Do NOT add informal language to formal/academic text.",
-    "Moderate": "Substantially rewrite for human naturalness. Restructure half the sentences. Vary length (shortest 8-12 words, longest 28-40 words). For Academic/Professional: NO contractions. For Conversational/Journalistic: contractions welcome.",
-    "Deep":     "Completely transform into rich natural human writing appropriate to the chosen style. Every sentence restructured. Dramatic length variation. For ACADEMIC: scholarly discourse markers, hedging, NEVER contractions. For CONVERSATIONAL: contractions freely, rhetorical questions. Preserve 100% of original meaning and data.",
+    "Light": (
+        "LIGHT EDIT: Preserve 85% of structure. Target changes:\n"
+        "• Fix 3-4 of the most robotic sentences\n"
+        "• Add 2 varied-length sentences (one very short <8 words, one complex >28 words)\n"
+        "• Replace 3-4 hollow AI transitions with specific discourse markers\n"
+        "• Fix any passive voice in the opening sentences\n"
+        "• Do NOT add contractions to academic/professional text"
+    ),
+    "Moderate": (
+        "MODERATE REWRITE: Restructure at least 60% of sentences. Required changes:\n"
+        "• Sentence length must vary dramatically — shortest under 10 words, longest over 30 words\n"
+        "• Replace every generic transition (Additionally, Furthermore, Moreover, In conclusion) with a specific, contextual one\n"
+        "• Convert all passive-voice sentences to active where possible\n"
+        "• Add at least 4 discourse markers appropriate to the style\n"
+        "• Vary paragraph structure — at least one very short paragraph (1-2 sentences)\n"
+        "• Academic/Professional: NO contractions. Conversational/Journalistic: contractions mandatory."
+    ),
+    "Deep": (
+        "DEEP TRANSFORMATION: Rebuild every sentence from scratch. Non-negotiable requirements:\n"
+        "• EVERY sentence must be restructured — do not keep any original sentence as-is\n"
+        "• SENTENCE LENGTH MUST VARY WILDLY: include sentences of 4-6 words AND sentences of 35-45 words\n"
+        "• NO two consecutive sentences may follow the same grammatical pattern\n"
+        "• NO sentence may begin with the same word as the previous sentence\n"
+        "• Add 5+ discourse markers and transitions appropriate to the chosen style\n"
+        "• Vary paragraph length: at least one single-sentence paragraph and one 5+ sentence paragraph\n"
+        "• Academic: scholarly hedging + complex subordinate clauses + ZERO contractions\n"
+        "• Conversational: contractions in every other sentence + fragments + rhetorical questions\n"
+        "• The output must read as if written by a real expert human, not an AI\n"
+        "• Preserve 100% of original meaning, data, and terminology"
+    ),
 }
 
 _STYLE_REGISTER_RULES = {
-    "Academic":      "REGISTER: Absolutely NO contractions. NO informal language. Humanness via rhythm variation, hedging, and discourse markers only.",
-    "Conversational":"REGISTER: Contractions freely. Warm, engaging, natural. Rhetorical questions and personal voice encouraged.",
-    "Professional":  "REGISTER: Avoid contractions in formal contexts. Confident, polished, formal-natural.",
-    "Journalistic":  "REGISTER: Sparse purposeful contractions (Economist style). Punchy, direct, active voice.",
-    "Creative":      "REGISTER: Selective contractions for natural voice. Expressive, vivid, literary quality.",
+    "Academic": (
+        "ACADEMIC REGISTER ENFORCEMENT:\n"
+        "✗ FORBIDDEN: contractions of any kind (write: it is, do not, we have, cannot)\n"
+        "✗ FORBIDDEN: informal phrases, casual asides, colloquialisms\n"
+        "✓ REQUIRED: formal scholarly vocabulary\n"
+        "✓ REQUIRED: hedging language (the evidence suggests, it appears, arguably, tentatively)\n"
+        "✓ REQUIRED: discipline-specific discourse markers (Notably, Crucially, Of significance)\n"
+        "✓ REQUIRED: complex subordinate clause structures"
+    ),
+    "Conversational": (
+        "CONVERSATIONAL REGISTER ENFORCEMENT:\n"
+        "✓ REQUIRED: contractions in every 2nd or 3rd sentence minimum\n"
+        "✓ REQUIRED: at least 2 rhetorical questions\n"
+        "✓ REQUIRED: at least 1 em-dash (—) for rhythm\n"
+        "✓ REQUIRED: at least 1 fragment sentence for emphasis\n"
+        "✓ REQUIRED: first-person reference (I, we, you) at least once\n"
+        "✓ REQUIRED: natural connectors (And honestly, Here's the thing, What's more)"
+    ),
+    "Professional": (
+        "PROFESSIONAL REGISTER ENFORCEMENT:\n"
+        "✓ REQUIRED: at least 1 analytical caveat or nuance ('though the picture is more complex')\n"
+        "✓ REQUIRED: active voice for 80%+ of sentences\n"
+        "✓ REQUIRED: at least 1 short solo paragraph (1-2 sentences) for impact\n"
+        "✓ REQUIRED: power transitions (That said, More importantly, In practice, Taken together)\n"
+        "✗ AVOID: consecutive sentences starting with 'The'"
+    ),
+    "Journalistic": (
+        "JOURNALISTIC REGISTER ENFORCEMENT:\n"
+        "✓ REQUIRED: first sentence must be punchy hook, 8-12 words\n"
+        "✓ REQUIRED: at least 1 Economist-style rhetorical transition (The result? Consider this:)\n"
+        "✓ REQUIRED: end with a tension, contrast, or implication\n"
+        "✓ REQUIRED: active voice throughout\n"
+        "✗ AVOID: vague generalisations — replace with specifics"
+    ),
+    "Creative": (
+        "CREATIVE REGISTER ENFORCEMENT:\n"
+        "✓ REQUIRED: at least 2 fragment sentences for rhythmic emphasis\n"
+        "✓ REQUIRED: at least 1 metaphor or concrete image\n"
+        "✓ REQUIRED: at least 1 single-sentence paragraph\n"
+        "✓ REQUIRED: varied sentence rhythm (short-long-short pattern)\n"
+        "✗ AVOID: predictable adjective choices — find surprising but accurate alternatives"
+    ),
 }
 
 def _build_prompt(style, intensity, chunk):
-    system = STYLE_PROMPTS[style]
-    note   = INTENSITY_INSTRUCTIONS[intensity]
-    reg    = _STYLE_REGISTER_RULES[style]
-    user   = f"""{note}\n\n{reg}\n\nABSOLUTE RULES:\n1. Output ONLY the rewritten text — no preamble, no commentary.\n2. Preserve 100% of original meaning, data, statistics, technical terms, citations.\n3. No bullet points unless original had them.\n4. SENTENCE LENGTH VARIATION IS MANDATORY — concise (10-15 words) AND complex (28-40 words) sentences.\n5. No consecutive sentences starting with the same word.\n6. At least 3 appropriate transition phrases for the register.\n7. Do NOT invent new facts.\n\nTEXT TO REWRITE:\n\"\"\"\n{chunk}\n\"\"\"\n"""
+    system     = STYLE_PROMPTS[style]
+    note       = INTENSITY_INSTRUCTIONS[intensity]
+    reg        = _STYLE_REGISTER_RULES[style]
+    few_shot   = _FEW_SHOT.get(style, "")
+    anti_ai    = _AI_PATTERNS_TO_AVOID
+
+    user = (
+        "TASK: Rewrite the text below to maximise humanness score.\n\n"
+        f"INTENSITY LEVEL:\n{note}\n\n"
+        f"REGISTER REQUIREMENTS:\n{reg}\n\n"
+        f"{anti_ai}\n\n"
+        f"{few_shot}\n\n"
+        "ABSOLUTE OUTPUT RULES:\n"
+        "1. Output ONLY the rewritten text — zero preamble, zero commentary, zero explanation.\n"
+        "2. Preserve 100% of original meaning, all numerical data, all citations, all technical terms.\n"
+        "3. No bullet points or numbered lists unless the original text contained them.\n"
+        "4. SENTENCE LENGTH VARIATION IS NON-NEGOTIABLE: your output MUST contain both very short "
+        "sentences (4-8 words) AND long complex sentences (32-45 words). "
+        "If every sentence is 15-25 words, you have failed.\n"
+        "5. No two consecutive sentences may begin with the same word.\n"
+        "6. Do NOT invent new facts, statistics, or examples not present in the original.\n"
+        "7. SELF-CHECK before outputting: scan your rewrite for AI patterns listed above and fix any you find.\n\n"
+        f"TEXT TO REWRITE:\n\"\"\"\n{chunk}\n\"\"\"\n"
+    )
     return system, user
 
-def chunk_text(text, max_words=800):
+def chunk_text(text, max_words=450):
     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
     chunks, current, current_wc = [], [], 0
     for para in paragraphs:
@@ -273,7 +469,7 @@ def call_groq(api_key, model, system_prompt, user_prompt, max_tokens=2048, strea
     payload = {"model": model,
                "messages": [{"role":"system","content":system_prompt},
                              {"role":"user","content":user_prompt}],
-               "max_tokens": max_tokens, "temperature": 0.7, "stream": stream}
+               "max_tokens": max_tokens, "temperature": 0.85, "stream": stream}
     resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
                          headers=headers, json=payload, timeout=120, stream=stream)
     resp.raise_for_status()
@@ -799,7 +995,7 @@ ADMIN_PASSWORD = "your_admin_password"
     with adm_tab2:
         st.markdown('<div class="card-title">📊 App Info</div>', unsafe_allow_html=True)
         info_items = [
-            ("Version", "v6.0 · NYZTrade"),
+            ("Version", "v6.1 · NYZTrade"),
             ("Mode", "Single-user · No login required"),
             ("Tools", "Humanizer · Paraphraser · Grammar Checker · Research Tools"),
             ("Backend", "Groq API (streaming)"),
@@ -863,7 +1059,7 @@ with st.sidebar:
 # ── HERO ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero-banner">
-  <div class="hero-badge">v6.0 · NYZTrade</div>
+  <div class="hero-badge">v6.1 · NYZTrade</div>
   <div class="hero-title">HumanizeAI</div>
   <div class="hero-sub">Humanizer · Paraphraser · Grammar Checker · Research Tools · 8-dimension scoring</div>
 </div>""", unsafe_allow_html=True)
@@ -907,7 +1103,7 @@ style="background:#1a3a2e;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
                 st.session_state.clear_input=True; st.rerun()
 
         if input_text.strip():
-            scores_in = compute_scores(input_text)
+            scores_in = compute_scores(input_text, style)
             st.markdown('<p style="color:#c9a84c;font-weight:700;margin-top:0.6rem;">Before — Humanness</p>', unsafe_allow_html=True)
             r1,r2,r3,r4=st.columns(4)
             with r1: st.markdown(render_score_ring(scores_in["humanness"],"Humanness"),unsafe_allow_html=True)
@@ -927,7 +1123,7 @@ style="background:#1a3a2e;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
                 f'<div class="output-box">{_html.escape(output_text)}</div>',
                 unsafe_allow_html=True)
             make_copy_btn("humanizer-out", output_text, "📋 Copy Text")
-            scores_out = compute_scores(output_text)
+            scores_out = compute_scores(output_text, style)
             wc_out = scores_out.get("word_count",0)
             st.markdown(f'<span class="wc-badge">📝 {wc_out:,} words</span>', unsafe_allow_html=True)
             st.markdown('<p style="color:#c9a84c;font-weight:700;margin-top:0.6rem;">After — Humanness</p>', unsafe_allow_html=True)
@@ -1491,7 +1687,7 @@ KEYWORDS: {", ".join(s.get("keywords",[]))}
 if scores_in and scores_out:
     st.markdown("---")
     st.markdown('<div class="card-title" style="font-size:1.1rem;">📊 Before vs After</div>', unsafe_allow_html=True)
-    delta=scores_out["humanness"]-scores_in["humanness"]
+    delta=scores_out["humanness"]-scores_in["humanness"]  # style-aware scores
     delta_sign="+" if delta>=0 else ""
     delta_color="#6fcf97" if delta>=0 else "#e87a7a"
     st.markdown(f"""<div class="improvement-banner">
