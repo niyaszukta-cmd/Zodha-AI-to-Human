@@ -1395,6 +1395,166 @@ def parse_excel_to_articles(excel_bytes) -> list:
     except Exception as e:
         return []
 
+
+def extract_dois_from_text(text: str) -> list:
+    """Extract all DOIs from plain text using regex patterns."""
+    import re
+    patterns = [
+        r'10\.\d{4,9}/[-._;()/:A-Z0-9a-z]+',           # raw DOI
+        r'https?://(?:dx\.)?doi\.org/(10\.\d{4,9}/[-._;()/:A-Z0-9a-z]+)',  # URL form
+        r'DOI:\s*(10\.\d{4,9}/[-._;()/:A-Z0-9a-z]+)',  # "DOI: ..." form
+    ]
+    found = set()
+    for pat in patterns:
+        for m in re.finditer(pat, text, re.IGNORECASE):
+            doi = m.group(1) if m.lastindex else m.group(0)
+            # Clean trailing punctuation
+            doi = doi.rstrip('.,;)')
+            if doi.startswith('10.'):
+                found.add(doi)
+    return list(found)
+
+
+def parse_word_references(file_bytes, filename: str) -> tuple:
+    """
+    Extract DOIs and plain references from a Word (.docx) or text file.
+    Returns (doi_list, plain_refs_list, raw_text).
+    """
+    raw_text = ""
+    ext = filename.split(".")[-1].lower()
+    try:
+        if ext in ("docx", "doc"):
+            try:
+                import docx as _docx_mod
+                import io as _io4
+                doc = _docx_mod.Document(_io4.BytesIO(file_bytes))
+                raw_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            except ImportError:
+                raw_text = file_bytes.decode("utf-8", errors="ignore")
+        else:
+            raw_text = file_bytes.decode("utf-8", errors="ignore")
+    except Exception:
+        raw_text = ""
+
+    dois = extract_dois_from_text(raw_text)
+
+    # Also parse plain reference lines (lines that look like citations)
+    import re
+    plain_refs = []
+    for line in raw_text.split("\n"):
+        line = line.strip()
+        # Skip very short lines and headings
+        if len(line) < 30:
+            continue
+        # Looks like a reference: starts with author pattern or number
+        if re.match(r'^(\d+\.?\s|[A-Z][a-z]+,\s*[A-Z]\.?|\[\d+\])', line):
+            plain_refs.append(line)
+
+    return dois, plain_refs, raw_text
+
+
+def fetch_articles_from_dois(api_key: str, model: str, dois: list,
+                               plain_refs: list, raw_text: str,
+                               progress_cb=None) -> list:
+    """
+    For each DOI: fetch CrossRef metadata + ask AI to summarise.
+    For plain refs without DOIs: ask AI to extract structured data.
+    Returns list of article dicts.
+    """
+    articles = []
+
+    # ── Process DOIs via CrossRef ────────────────────────────────────
+    for i, doi in enumerate(dois):
+        if progress_cb:
+            progress_cb(i, len(dois) + (1 if plain_refs else 0),
+                        f"Fetching DOI {i+1}/{len(dois)}: {doi[:40]}…")
+        try:
+            meta = fetch_doi_metadata(doi)
+            if "error" not in meta:
+                # Use CrossRef metadata directly — summarise context from raw_text if possible
+                # Find the surrounding text for this DOI
+                import re
+                context = ""
+                idx = raw_text.find(doi)
+                if idx > 0:
+                    context = raw_text[max(0, idx-300):idx+300]
+                # Build a minimal article dict from CrossRef metadata
+                articles.append({
+                    "title":           meta.get("title",""),
+                    "authors":         meta.get("authors",[]),
+                    "year":            meta.get("year",""),
+                    "journal":         meta.get("journal",""),
+                    "doi":             doi,
+                    "main_objectives": f"Retrieved via CrossRef. Context: {context[:200]}" if context else "Retrieved via CrossRef.",
+                    "methodology":     "",
+                    "major_findings":  [f"See: https://doi.org/{doi}"],
+                    "keywords":        [],
+                    "limitations":     "",
+                    "conclusion":      "",
+                    "_source":         "crossref",
+                })
+        except Exception:
+            # If CrossRef fails, store just the DOI
+            articles.append({
+                "title":           f"Article (DOI: {doi})",
+                "authors":         [],
+                "year":            "",
+                "journal":         "",
+                "doi":             doi,
+                "main_objectives": "",
+                "methodology":     "",
+                "major_findings":  [],
+                "keywords":        [],
+                "limitations":     "",
+                "conclusion":      "",
+                "_source":         "doi_only",
+            })
+
+    # ── Process plain references via AI ──────────────────────────────
+    if plain_refs and api_key:
+        if progress_cb:
+            n_dois = len(dois)
+            progress_cb(n_dois, n_dois + 1, f"AI parsing {len(plain_refs)} plain references…")
+        refs_block = "\n".join(f"{j+1}. {r}" for j,r in enumerate(plain_refs[:50]))
+        sys_prompt = """You are a reference parser. Extract structured data from the reference list.
+Return a JSON array where each element has:
+  "title", "authors" (list of strings), "year", "journal", "doi" (or empty string), "keywords" (list)
+Return ONLY valid JSON array."""
+        user_msg = f"Extract structured data from these references:\n\n{refs_block}"
+        try:
+            resp = call_groq(api_key, model, sys_prompt, user_msg, max_tokens=3000, stream=False)
+            raw = resp.json()["choices"][0]["message"]["content"].strip()
+            import re as _re2
+            raw = _re2.sub(r"^```(?:json)?\s*","",raw)
+            raw = _re2.sub(r"\s*```$","",raw)
+            import json as _json2
+            parsed_refs = _json2.loads(raw)
+            for ref in parsed_refs:
+                if not ref.get("title"):
+                    continue
+                # Check if we already have this via DOI
+                existing_dois = {a.get("doi","") for a in articles}
+                if ref.get("doi","") and ref["doi"] in existing_dois:
+                    continue
+                articles.append({
+                    "title":           ref.get("title",""),
+                    "authors":         ref.get("authors",[]) if isinstance(ref.get("authors",[]),list) else [str(ref.get("authors",""))],
+                    "year":            str(ref.get("year","")),
+                    "journal":         ref.get("journal",""),
+                    "doi":             ref.get("doi",""),
+                    "main_objectives": "",
+                    "methodology":     "",
+                    "major_findings":  [],
+                    "keywords":        ref.get("keywords",[]) if isinstance(ref.get("keywords",[]),list) else [],
+                    "limitations":     "",
+                    "conclusion":      "",
+                    "_source":         "plain_ref",
+                })
+        except Exception:
+            pass
+
+    return articles
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG & CSS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2263,34 +2423,176 @@ KEYWORDS: {", ".join(s.get("keywords",[]))}
 
         arts_for_writer = st.session_state.get("lit_review_articles", [])
 
-        # ── EXCEL IMPORT (always shown at top) ──────────────────────────────
-        with st.expander("📊 Import articles from Excel sheet", expanded=(not arts_for_writer)):
-            st.markdown('<p style="color:rgba(255,255,255,0.75);font-size:0.85rem;">'
-                        'Upload the Excel file you downloaded from the Literature Review tab. '
-                        'Articles will be added to your review list automatically.</p>',
-                        unsafe_allow_html=True)
-            excel_upload = st.file_uploader(
-                "Upload Literature Review Excel",
-                type=["xlsx"], key="lr_excel_import",
-                label_visibility="collapsed",
-                help="Upload the .xlsx generated by the Literature Review Manager"
-            )
-            if excel_upload:
-                if st.button("📥 Import articles from Excel", type="primary", key="import_excel_btn"):
-                    with st.spinner("Parsing Excel…"):
-                        imported = parse_excel_to_articles(excel_upload.read())
-                    if imported:
-                        existing = st.session_state.get("lit_review_articles", [])
-                        # Avoid duplicates by title
-                        existing_titles = {a.get("title","").lower() for a in existing}
-                        new_arts = [a for a in imported if a.get("title","").lower() not in existing_titles]
-                        st.session_state.lit_review_articles = existing + new_arts
-                        arts_for_writer = st.session_state.lit_review_articles
-                        st.success(f"✅ Imported {len(new_arts)} article(s) from Excel. "
-                                   f"Total: {len(arts_for_writer)}")
-                        st.rerun()
+        # ── IMPORT PANEL (3 methods) ────────────────────────────────────────
+        with st.expander("📥 Import Articles", expanded=(not arts_for_writer)):
+            imp_tab_a, imp_tab_b, imp_tab_c = st.tabs([
+                "📊 From Excel",
+                "📝 From Word / DOI file",
+                "🔗 Paste DOIs or References"
+            ])
+
+            # ── TAB A: Excel ─────────────────────────────────────────────────
+            with imp_tab_a:
+                st.markdown('<p style="color:rgba(255,255,255,0.75);font-size:0.85rem;">'
+                            'Upload the <b>.xlsx</b> generated by the Literature Review Manager. '
+                            'All columns (title, authors, objectives, methodology, findings) '
+                            'are parsed automatically.</p>', unsafe_allow_html=True)
+                excel_upload = st.file_uploader(
+                    "Upload Excel", type=["xlsx"], key="lr_excel_import",
+                    label_visibility="collapsed"
+                )
+                if excel_upload:
+                    if st.button("📥 Import from Excel", type="primary", key="import_excel_btn",
+                                 use_container_width=True):
+                        with st.spinner("Parsing Excel…"):
+                            imported = parse_excel_to_articles(excel_upload.read())
+                        if imported:
+                            existing = st.session_state.get("lit_review_articles", [])
+                            existing_titles = {a.get("title","").lower() for a in existing}
+                            new_arts = [a for a in imported
+                                        if a.get("title","").lower() not in existing_titles]
+                            st.session_state.lit_review_articles = existing + new_arts
+                            st.success(f"✅ Imported {len(new_arts)} article(s) from Excel.")
+                            st.rerun()
+                        else:
+                            st.error("❌ Could not parse. Make sure it's a Zodha Literature Review export.")
+
+            # ── TAB B: Word / DOI file ───────────────────────────────────────
+            with imp_tab_b:
+                st.markdown('<p style="color:rgba(255,255,255,0.75);font-size:0.85rem;">'
+                            'Upload a <b>Word document (.docx)</b> or <b>text file (.txt)</b> '
+                            'containing references, a reference list, or DOIs. '
+                            'DOIs are fetched from CrossRef; plain references are parsed by AI.</p>',
+                            unsafe_allow_html=True)
+
+                word_file = st.file_uploader(
+                    "Upload Word / text file",
+                    type=["docx","doc","txt"], key="lr_word_import",
+                    label_visibility="collapsed",
+                    help="Supports: reference list, bibliography, DOI list, any document with DOIs"
+                )
+                if word_file:
+                    file_bytes_w = word_file.read()
+                    dois_found, plain_refs_found, raw_txt = parse_word_references(
+                        file_bytes_w, word_file.name
+                    )
+                    # Show preview
+                    col_prev1, col_prev2 = st.columns(2)
+                    with col_prev1:
+                        st.markdown(f"""<div style="background:#f0f7f0;border-radius:8px;
+                             padding:0.7rem;text-align:center;">
+                          <div style="font-size:0.7rem;color:#3d5e40;text-transform:uppercase;">DOIs found</div>
+                          <div style="font-size:1.6rem;font-weight:700;color:#1e5c22;">{len(dois_found)}</div>
+                        </div>""", unsafe_allow_html=True)
+                    with col_prev2:
+                        st.markdown(f"""<div style="background:#f0f7f0;border-radius:8px;
+                             padding:0.7rem;text-align:center;">
+                          <div style="font-size:0.7rem;color:#3d5e40;text-transform:uppercase;">Plain refs found</div>
+                          <div style="font-size:1.6rem;font-weight:700;color:#1e5c22;">{len(plain_refs_found)}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                    if dois_found:
+                        with st.expander(f"Preview {len(dois_found)} DOI(s)"):
+                            for d in dois_found[:20]:
+                                st.code(d, language=None)
+                    if plain_refs_found:
+                        with st.expander(f"Preview {len(plain_refs_found)} plain reference(s)"):
+                            for r in plain_refs_found[:10]:
+                                st.markdown(f'<div style="font-size:0.78rem;color:#1a2e1b;margin-bottom:0.3rem;">{r[:120]}</div>',
+                                            unsafe_allow_html=True)
+
+                    if dois_found or plain_refs_found:
+                        if st.button("🔍 Fetch Metadata & Import",
+                                     type="primary", use_container_width=True,
+                                     key="import_word_btn",
+                                     disabled=not groq_key and not dois_found):
+                            prog_bar = st.progress(0, "Starting…")
+                            def _prog(i, total, msg):
+                                prog_bar.progress(min(1.0, (i+1)/max(total,1)), text=msg)
+
+                            with st.spinner("Fetching metadata and parsing references…"):
+                                fetched = fetch_articles_from_dois(
+                                    groq_key, model_choice,
+                                    dois_found, plain_refs_found, raw_txt,
+                                    progress_cb=_prog
+                                )
+                            prog_bar.progress(1.0, "✅ Done")
+                            if fetched:
+                                existing = st.session_state.get("lit_review_articles", [])
+                                existing_titles = {a.get("title","").lower() for a in existing}
+                                new_arts = [a for a in fetched
+                                            if a.get("title","").lower() not in existing_titles]
+                                st.session_state.lit_review_articles = existing + new_arts
+                                st.success(f"✅ Added {len(new_arts)} article(s). "
+                                           f"Total: {len(st.session_state.lit_review_articles)}")
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ No articles could be extracted.")
                     else:
-                        st.error("❌ Could not parse Excel. Make sure it's a Zodha Literature Review export.")
+                        st.info("No DOIs or reference patterns detected in this file. "
+                                "Try a file with a reference list or bibliography section.")
+
+            # ── TAB C: Paste DOIs / References ───────────────────────────────
+            with imp_tab_c:
+                st.markdown('<p style="color:rgba(255,255,255,0.75);font-size:0.85rem;">'
+                            'Paste a list of <b>DOIs</b> (one per line) or a <b>reference list</b> '
+                            '(APA, MLA, Harvard, Vancouver etc.). '
+                            'DOIs are fetched from CrossRef; plain references are parsed by AI.</p>',
+                            unsafe_allow_html=True)
+
+                pasted_refs = st.text_area(
+                    "Paste DOIs or references",
+                    height=200,
+                    label_visibility="collapsed",
+                    key="lr_paste_refs",
+                    placeholder=(
+                        "Paste DOIs (one per line):\n"
+                        "10.1016/j.jfineco.2021.01.004\n"
+                        "10.1086/261009\n\n"
+                        "Or paste a full reference list:\n"
+                        "Davis, F.D. (1989). Perceived usefulness, perceived ease of use... MIS Quarterly, 13(3), 319.\n"
+                        "Fornell, C., & Larcker, D.F. (1981). Evaluating structural equation models...\n"
+                    )
+                )
+
+                if pasted_refs.strip():
+                    dois_pasted   = extract_dois_from_text(pasted_refs)
+                    # Also treat each non-DOI line as a plain ref
+                    import re as _re3
+                    plain_pasted  = [
+                        line.strip() for line in pasted_refs.split("\n")
+                        if line.strip() and len(line.strip()) > 30
+                        and not _re3.match(r'^10\.\d{4,9}/', line.strip())
+                        and "doi.org" not in line.lower()
+                    ]
+                    st.markdown(f'<span class="wc-badge">DOIs: {len(dois_pasted)} · Plain refs: {len(plain_pasted)}</span>',
+                                unsafe_allow_html=True)
+
+                    if st.button("🔍 Fetch & Import", type="primary",
+                                 use_container_width=True, key="import_paste_btn",
+                                 disabled=(not dois_pasted and not plain_pasted)):
+                        prog2 = st.progress(0, "Starting…")
+                        def _prog2(i, total, msg):
+                            prog2.progress(min(1.0, (i+1)/max(total,1)), text=msg)
+
+                        with st.spinner("Processing references…"):
+                            fetched2 = fetch_articles_from_dois(
+                                groq_key, model_choice,
+                                dois_pasted, plain_pasted, pasted_refs,
+                                progress_cb=_prog2
+                            )
+                        prog2.progress(1.0, "✅ Done")
+                        if fetched2:
+                            existing = st.session_state.get("lit_review_articles", [])
+                            existing_titles = {a.get("title","").lower() for a in existing}
+                            new_arts = [a for a in fetched2
+                                        if a.get("title","").lower() not in existing_titles]
+                            st.session_state.lit_review_articles = existing + new_arts
+                            st.success(f"✅ Added {len(new_arts)} article(s). "
+                                       f"Total: {len(st.session_state.lit_review_articles)}")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ Could not extract any articles. Check your input.")
 
         if not arts_for_writer:
             st.markdown('''<div style="background:white;border:1.5px dashed #b0d4b2;border-radius:10px;
