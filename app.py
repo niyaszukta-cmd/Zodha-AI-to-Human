@@ -866,6 +866,222 @@ def build_literature_excel(articles: list) -> bytes:
     return buf.getvalue()
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LAYER 3 — STATISTICAL & METHODOLOGY SUPPORT PROMPTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+SPSS_INTERPRET_SYSTEM = """You are a senior research methodologist and statistician specialising
+in social science and management research. A researcher has pasted raw SPSS/AMOS/SmartPLS output.
+Your task: explain it in clear, publication-ready academic prose that can be inserted directly
+into a thesis or journal paper Results section.
+
+Return a JSON object with exactly these keys:
+- "test_type": name of the statistical test detected (e.g. "Multiple Linear Regression", "CFA", "SEM", "t-test")
+- "plain_english": 2-3 sentence plain explanation a non-statistician would understand
+- "academic_prose": 3-5 sentences of formal academic writing ready to paste into a Results section.
+  Include specific values (F, t, p, R², β, RMSEA, CFI etc.) exactly as given.
+- "interpretation": what the results mean for the research hypothesis (supported / not supported / partial)
+- "apa_table": if a table is present, reproduce key stats in APA 7th format as a string
+- "assumptions_check": any statistical assumptions the researcher should verify for this test
+- "limitations": 1-2 sentence note on what this result cannot conclude
+
+Return ONLY valid JSON."""
+
+METHODOLOGY_SYSTEM = """You are an expert research design consultant with deep expertise in
+quantitative, qualitative, and mixed-method social science research.
+A researcher has described their study. Recommend the most suitable research methodology.
+
+Return a JSON object with exactly these keys:
+- "recommended_approach": primary methodology (Quantitative / Qualitative / Mixed Methods)
+- "design": specific design (e.g. "Cross-sectional survey", "Longitudinal panel", "Grounded theory", "SEM-based causal model")
+- "rationale": 3-4 sentences explaining why this methodology fits the research objectives
+- "data_collection": list of 3-5 recommended data collection methods
+- "analysis_techniques": list of 4-6 statistical or analytical techniques suitable for this study
+- "software": recommended software (SPSS / AMOS / SmartPLS / NVivo / R / Python)
+- "sample_size": recommended sample size with justification (mention Hair et al. or Roscoe rule if relevant)
+- "sampling_strategy": e.g. "Stratified random sampling", "Purposive sampling"
+- "alternative_designs": list 2 alternative methodologies with 1-line pros/cons each
+- "conceptual_framework_hint": 2-3 sentence suggestion for the theoretical framework
+
+Return ONLY valid JSON."""
+
+HYPOTHESIS_SYSTEM = """You are a senior academic researcher specialising in hypothesis development
+for management, finance, social science, and business research.
+Generate testable, well-grounded research hypotheses based on the topic and variables provided.
+
+Return a JSON object with exactly these keys:
+- "research_question": the overarching research question derived from the input
+- "null_hypotheses": list of H0 statements (at least 3)
+- "alternate_hypotheses": list of H1/H2/H3... corresponding alternate hypotheses
+- "directional_rationale": for each hypothesis, 1-2 sentences of theoretical justification
+  (cite plausible theories — TAM, Agency Theory, Stakeholder Theory, etc. where applicable)
+- "variable_classification": object with "independent", "dependent", "moderating", "mediating"
+  variable lists derived from the input
+- "suggested_scale": for each variable, suggest a validated measurement scale if applicable
+- "expected_relationships": a summary of expected directional relationships (+/-)
+
+Return ONLY valid JSON."""
+
+VARIABLE_OPERATIONALISE_SYSTEM = """You are a psychometrics and scale development expert.
+Given a research variable, operationalise it with validated measurement items suitable
+for a 5-point Likert scale survey instrument for Indian academic research.
+
+Return a JSON object with exactly these keys:
+- "variable": the variable name
+- "construct_definition": formal academic definition (2-3 sentences)
+- "dimensions": list of sub-dimensions/facets of this construct
+- "measurement_items": list of 5-7 survey items (statements for Likert scale)
+- "scale_source": name of the original validated scale this is adapted from (e.g. "Davis 1989 TAM", "Fornell & Larcker 1981")
+- "response_format": the Likert scale description (e.g. "1=Strongly Disagree to 5=Strongly Agree")
+- "reliability_note": how to check reliability (Cronbach alpha threshold, AVE, CR)
+- "reverse_coded_items": list of item numbers that should be reverse coded (if any)
+
+Return ONLY valid JSON."""
+
+
+# ── Layer 3 functions ────────────────────────────────────────────────────────
+
+def interpret_spss_output(api_key: str, model: str, spss_text: str) -> dict:
+    user_msg = f"SPSS/AMOS/SmartPLS OUTPUT TO INTERPRET:\n\"\"\"\n{spss_text[:4000]}\n\"\"\""
+    resp = call_groq(api_key, model, SPSS_INTERPRET_SYSTEM, user_msg, max_tokens=2000, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
+def recommend_methodology(api_key: str, model: str, description: str) -> dict:
+    user_msg = f"RESEARCH DESCRIPTION:\n\"\"\"\n{description}\n\"\"\""
+    resp = call_groq(api_key, model, METHODOLOGY_SYSTEM, user_msg, max_tokens=2000, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
+def generate_hypotheses(api_key: str, model: str, topic: str, variables: str) -> dict:
+    user_msg = f"RESEARCH TOPIC:\n{topic}\n\nKEY VARIABLES MENTIONED:\n{variables}"
+    resp = call_groq(api_key, model, HYPOTHESIS_SYSTEM, user_msg, max_tokens=2000, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
+def operationalise_variable(api_key: str, model: str, variable: str, context: str) -> dict:
+    user_msg = f"VARIABLE TO OPERATIONALISE: {variable}\nRESEARCH CONTEXT: {context}"
+    resp = call_groq(api_key, model, VARIABLE_OPERATIONALISE_SYSTEM, user_msg, max_tokens=1500, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LAYER 5 — JOURNAL & PUBLICATION SUPPORT PROMPTS
+# Tools: Journal Matcher, Cover Letter Writer, Reviewer Response Drafter,
+#         Research Contribution Statement
+# ══════════════════════════════════════════════════════════════════════════════
+
+JOURNAL_MATCH_SYSTEM = """You are a senior academic publishing consultant with expertise in
+Scopus, ABDC, ABS, Web of Science, and Indian journal indices (UGC CARE).
+Given an abstract and research details, recommend the most suitable journals.
+
+Return a JSON object with exactly these keys:
+- "research_domain": detected primary field and sub-field
+- "recommendations": list of 6 journal objects, each with:
+    "name": journal name
+    "publisher": publisher name
+    "index": indexing (Scopus / ABDC A / ABDC B / ABDC C / ABS / Web of Science / UGC CARE)
+    "impact_factor": approximate IF or quartile (Q1/Q2/Q3) or "N/A"
+    "scope_fit": 1-2 sentence explanation of why this journal fits
+    "acceptance_rate": approximate % or "not published"
+    "turnaround": typical review time in weeks
+    "open_access": yes/no/hybrid
+    "submission_url": provide the official journal page URL if known, else "search: [journal name] submissions"
+- "avoid": list of 2-3 predatory or low-quality journals in this space to avoid
+- "strategy_note": 2-3 sentences on the submission strategy (where to aim first, backup plan)
+
+Return ONLY valid JSON."""
+
+COVER_LETTER_SYSTEM = """You are an expert academic editor who has helped hundreds of authors
+publish in top-tier journals. Write a compelling, professional cover letter for journal submission.
+
+Output a single JSON object with:
+- "cover_letter": the full cover letter text (400-600 words) formatted for direct use
+- "key_contributions": bullet list of 3-4 key contributions of the paper
+- "novelty_statement": 2-sentence statement of what is new/original about this work
+- "ethical_statements": standard statements (conflicts of interest, funding, author contributions)
+
+Return ONLY valid JSON."""
+
+REVIEWER_RESPONSE_SYSTEM = """You are a senior academic who has reviewed for top journals and
+helped authors navigate the revision process. Draft a point-by-point response to reviewer comments.
+
+Return a JSON object with:
+- "response_header": professional opening paragraph thanking reviewers (3-4 sentences)
+- "responses": list of objects for each comment, each with:
+    "reviewer": "Reviewer 1" or "Reviewer 2" etc.
+    "comment_summary": brief summary of the reviewer's comment
+    "response": full professional response (2-5 sentences)
+    "manuscript_change": what was changed in the manuscript (or "No change required — see explanation")
+- "closing_paragraph": professional closing (2-3 sentences)
+- "revision_summary": 1-paragraph executive summary of all changes made
+
+Return ONLY valid JSON."""
+
+CONTRIBUTION_STATEMENT_SYSTEM = """You are an expert in academic writing and research positioning.
+Write a Research Contribution Statement suitable for a journal submission or thesis.
+
+Return a JSON object with:
+- "theoretical_contribution": 2-3 sentences on contribution to theory
+- "methodological_contribution": 2-3 sentences on methodological innovation (if any)
+- "practical_contribution": 2-3 sentences on practical/policy implications
+- "contextual_novelty": 1-2 sentences on geographic/sector novelty (e.g. Indian context)
+- "gap_addressed": 2-3 sentences on the research gap this work fills
+- "full_statement": a complete 150-200 word Research Contribution paragraph ready to use in a paper
+
+Return ONLY valid JSON."""
+
+
+# ── Layer 5 functions ────────────────────────────────────────────────────────
+
+def match_journals(api_key: str, model: str, abstract: str, keywords: str, field: str) -> dict:
+    user_msg = (f"ABSTRACT:\n{abstract[:2000]}\n\n"
+                f"KEYWORDS: {keywords}\nFIELD: {field}")
+    resp = call_groq(api_key, model, JOURNAL_MATCH_SYSTEM, user_msg, max_tokens=2500, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
+def write_cover_letter(api_key: str, model: str, title: str, abstract: str,
+                        journal: str, authors: str) -> dict:
+    user_msg = (f"PAPER TITLE: {title}\nJOURNAL TARGET: {journal}\n"
+                f"AUTHORS: {authors}\nABSTRACT:\n{abstract[:1500]}")
+    resp = call_groq(api_key, model, COVER_LETTER_SYSTEM, user_msg, max_tokens=1500, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
+def draft_reviewer_response(api_key: str, model: str, comments: str, abstract: str) -> dict:
+    user_msg = (f"PAPER ABSTRACT:\n{abstract[:1000]}\n\n"
+                f"REVIEWER COMMENTS:\n\"\"\"\n{comments[:3000]}\n\"\"\"")
+    resp = call_groq(api_key, model, REVIEWER_RESPONSE_SYSTEM, user_msg, max_tokens=2500, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
+def write_contribution_statement(api_key: str, model: str, title: str,
+                                   objectives: str, findings: str, context: str) -> dict:
+    user_msg = (f"PAPER TITLE: {title}\nRESEARCH OBJECTIVES: {objectives}\n"
+                f"KEY FINDINGS: {findings}\nCONTEXT/SETTING: {context}")
+    resp = call_groq(api_key, model, CONTRIBUTION_STATEMENT_SYSTEM, user_msg, max_tokens=1200, stream=False)
+    raw  = resp.json()["choices"][0]["message"]["content"].strip()
+    raw  = re.sub(r"^```(?:json)?\s*","",raw); raw=re.sub(r"\s*```$","",raw)
+    try: return json.loads(raw)
+    except: return {"error": "Parse error", "raw": raw}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG & CSS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -923,7 +1139,10 @@ div[data-testid="stAlert"] p{color:#1a2e1b!important;}
 # ══════════════════════════════════════════════════════════════════════════════
 for k,v in [("output_text",""),("paraphrase_out",""),
              ("grammar_corrected",""),("grammar_issues",[]),
-             ("clear_input",False),("show_admin",False),("admin_auth",False)]:
+             ("clear_input",False),("show_admin",False),("admin_auth",False),
+             ("spss_result",{}),("method_result",{}),("hyp_result",{}),("var_result",{}),
+             ("journal_result",{}),("coverletter_result",{}),
+             ("reviewer_result",{}),("contrib_result",{})]:
     if k not in st.session_state: st.session_state[k]=v
 
 if st.session_state.clear_input:
@@ -997,7 +1216,7 @@ ADMIN_PASSWORD = "your_admin_password"
         info_items = [
             ("Version", "v6.1 · Zodha"),
             ("Mode", "Single-user · No login required"),
-            ("Tools", "Humanizer · Paraphraser · Grammar Checker · Research Tools"),
+            ("Tools", "Humanizer · Paraphraser · Grammar Checker · Research Tools · Statistics Suite · Publication Suite"),
             ("Backend", "Groq API (streaming)"),
             ("Models", ", ".join(GROQ_MODELS.keys())),
             ("Max Words/Session", "Unlimited"),
@@ -1072,13 +1291,13 @@ st.markdown(f"""
          alt="Zodha Research Solutions" />
     <div>
       <div class="hero-title" style="font-size:1.9rem;">Research Writing Pro</div>
-      <div class="hero-sub">AI Writing Suite · Citation Manager · Literature Review · 8-dimension Scoring</div>
+      <div class="hero-sub">Writing · Statistics · Publication · Citation · Literature Review · 8-dimension Scoring</div>
     </div>
   </div>
 </div>""", unsafe_allow_html=True)
 
 # ── TABS ───────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs(["✍️  Humanizer", "🔄  Paraphraser", "✅  Grammar Checker", "🔬  Research Tools"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["✍️  Humanizer", "🔄  Paraphraser", "✅  Grammar Checker", "🔬  Research Tools", "📊  Statistics Suite", "📰  Publication Suite"])
 scores_in = {}
 scores_out = {}
 
@@ -1743,3 +1962,549 @@ if scores_in and scores_out:
         st.download_button("⬇️ Download Output", data=st.session_state.output_text,
                            file_name="humanized_output.txt", mime="text/plain",
                            use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5 — STATISTICS SUITE (Layer 3)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab5:
+    import html as _html
+
+    st.markdown("""<div style="background:linear-gradient(135deg,#1a2e1b,#1e5c22);border-radius:12px;
+        padding:1rem 1.5rem;margin-bottom:1.2rem;">
+      <div style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#fff;">
+        📊 Statistics & Methodology Suite</div>
+      <div style="font-size:0.85rem;color:rgba(255,255,255,0.65);margin-top:0.3rem;">
+        SPSS/AMOS output interpretation · Methodology recommender · Hypothesis generator · Variable operationaliser
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    s1, s2, s3, s4 = st.tabs([
+        "📉 SPSS Interpreter",
+        "🧪 Methodology Recommender",
+        "🔬 Hypothesis Generator",
+        "📏 Variable Operationaliser"
+    ])
+
+    # ── S1: SPSS OUTPUT INTERPRETER ─────────────────────────────────────────
+    with s1:
+        st.markdown('<div class="card-title">📉 SPSS / AMOS / SmartPLS Output Interpreter</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Paste raw statistical output — regression tables, SEM fit indices, factor loadings, ANOVA tables — and get publication-ready Results section prose.</p>', unsafe_allow_html=True)
+
+        spss_input = st.text_area("SPSS output", height=220,
+            placeholder="Paste your SPSS/AMOS/SmartPLS output here...\n\nExample:\nModel Summary\nR = .742  R² = .551  Adjusted R² = .538  F(3,146) = 59.87  p < .001\n\nCoefficients:\nBeta  t    Sig.\nFinancial Literacy  .412  6.23  .000\nRisk Perception    .287  4.11  .001",
+            label_visibility="collapsed", key="spss_input")
+
+        spss_btn = st.button("🔍 Interpret Output", type="primary",
+                             disabled=(not spss_input.strip() or not groq_key), key="spss_btn")
+        if not groq_key: st.caption("🔑 Add Groq API key in sidebar.")
+
+        spss_res = st.session_state.spss_result
+        if spss_btn and spss_input.strip() and groq_key:
+            with st.spinner("Interpreting statistical output…"):
+                try:
+                    spss_res = interpret_spss_output(groq_key, model_choice, spss_input)
+                    st.session_state.spss_result = spss_res
+                    st.rerun()
+                except Exception as e: st.error(f"❌ {e}")
+
+        if spss_res and "error" not in spss_res:
+            st.markdown(f'<p style="color:#1e5c22;font-weight:700;margin-top:0.8rem;">Test detected: {_html.escape(spss_res.get("test_type",""))}</p>', unsafe_allow_html=True)
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown("""<div style="font-size:0.72rem;font-weight:700;color:#3a8c3f;
+                    text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.4rem;">Plain English</div>""",
+                    unsafe_allow_html=True)
+                st.markdown(f"""<div style="background:#f0f7f0;border-left:4px solid #3a8c3f;
+                    border-radius:0 8px 8px 0;padding:0.8rem 1rem;font-size:0.88rem;
+                    color:#1a2e1b;line-height:1.6;">{_html.escape(spss_res.get("plain_english",""))}</div>""",
+                    unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("""<div style="font-size:0.72rem;font-weight:700;color:#3a8c3f;
+                    text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.4rem;">Interpretation</div>""",
+                    unsafe_allow_html=True)
+                interp = spss_res.get("interpretation","")
+                i_color = "#1a4a1c" if "supported" in interp.lower() else "#4a1a1a"
+                i_text  = "#6fcf97" if "supported" in interp.lower() else "#e87a7a"
+                st.markdown(f"""<div style="background:{i_color};border-radius:8px;
+                    padding:0.7rem 1rem;font-size:0.88rem;color:{i_text};font-weight:600;">
+                    {_html.escape(interp)}</div>""", unsafe_allow_html=True)
+
+            with col_b:
+                st.markdown("""<div style="font-size:0.72rem;font-weight:700;color:#3a8c3f;
+                    text-transform:uppercase;letter-spacing:0.8px;margin-bottom:0.4rem;">Academic prose (paste into Results section)</div>""",
+                    unsafe_allow_html=True)
+                prose = spss_res.get("academic_prose","")
+                st.markdown(f"""<div style="background:white;border:1.5px solid #3a8c3f;
+                    border-radius:10px;padding:1rem 1.2rem;font-size:0.88rem;
+                    color:#1a2e1b;line-height:1.7;min-height:120px;">{_html.escape(prose)}</div>""",
+                    unsafe_allow_html=True)
+                make_copy_btn("spss-prose", prose, "📋 Copy Prose")
+
+            if spss_res.get("apa_table"):
+                st.markdown('<p style="color:#1e5c22;font-weight:700;margin-top:0.8rem;">APA-format table</p>', unsafe_allow_html=True)
+                st.code(spss_res.get("apa_table",""), language=None)
+
+            # Assumptions & limitations
+            with st.expander("⚠️ Assumptions to check & limitations"):
+                st.markdown(f"**Assumptions:** {_html.escape(spss_res.get('assumptions_check',''))}")
+                st.markdown(f"**Limitations:** {_html.escape(spss_res.get('limitations',''))}")
+
+            # Full copy
+            full_spss = f"""TEST: {spss_res.get('test_type','')}
+
+PLAIN ENGLISH:
+{spss_res.get('plain_english','')}
+
+ACADEMIC PROSE (for Results section):
+{spss_res.get('academic_prose','')}
+
+INTERPRETATION:
+{spss_res.get('interpretation','')}
+
+ASSUMPTIONS TO CHECK:
+{spss_res.get('assumptions_check','')}
+
+LIMITATIONS:
+{spss_res.get('limitations','')}"""
+            make_copy_btn("spss-full", full_spss, "📋 Copy Full Report")
+
+    # ── S2: METHODOLOGY RECOMMENDER ─────────────────────────────────────────
+    with s2:
+        st.markdown('<div class="card-title">🧪 Research Methodology Recommender</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Describe your research topic, objectives, and context — get a detailed methodology recommendation with sample size, sampling strategy, and analysis techniques.</p>', unsafe_allow_html=True)
+
+        meth_input = st.text_area("Research description", height=180,
+            placeholder="Describe your research. Example:\n\nI am studying the impact of financial literacy and digital banking adoption on the investment behaviour of women micro-entrepreneurs in Kerala. I want to understand causal relationships between constructs and test a structural model. My target population is women SHG members across Thrissur district.",
+            label_visibility="collapsed", key="meth_input")
+        meth_btn = st.button("🧪 Recommend Methodology", type="primary",
+                             disabled=(not meth_input.strip() or not groq_key), key="meth_btn")
+
+        meth_res = st.session_state.method_result
+        if meth_btn and meth_input.strip() and groq_key:
+            with st.spinner("Analysing research design…"):
+                try:
+                    meth_res = recommend_methodology(groq_key, model_choice, meth_input)
+                    st.session_state.method_result = meth_res
+                    st.rerun()
+                except Exception as e: st.error(f"❌ {e}")
+
+        if meth_res and "error" not in meth_res:
+            # Primary recommendation banner
+            st.markdown(f"""<div style="background:linear-gradient(135deg,#1a2e1b,#1e5c22);
+                border-radius:12px;padding:1rem 1.5rem;margin:0.8rem 0;">
+              <div style="font-size:0.75rem;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.8px;">Recommended approach</div>
+              <div style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#4caf50;margin-top:0.2rem;">
+                {_html.escape(meth_res.get("recommended_approach",""))} — {_html.escape(meth_res.get("design",""))}</div>
+              <div style="font-size:0.88rem;color:rgba(255,255,255,0.75);margin-top:0.5rem;line-height:1.6;">
+                {_html.escape(meth_res.get("rationale",""))}</div>
+            </div>""", unsafe_allow_html=True)
+
+            mc1, mc2, mc3 = st.columns(3)
+            with mc1:
+                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.82rem;">📊 Analysis techniques</p>', unsafe_allow_html=True)
+                for tech in meth_res.get("analysis_techniques",[]):
+                    st.markdown(f'<div style="background:#f0f7f0;border-radius:6px;padding:0.35rem 0.7rem;margin-bottom:0.3rem;font-size:0.82rem;color:#1a2e1b;">✓ {_html.escape(tech)}</div>', unsafe_allow_html=True)
+            with mc2:
+                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.82rem;">🔢 Sample & sampling</p>', unsafe_allow_html=True)
+                st.markdown(f'<div style="background:#f0f7f0;border-radius:8px;padding:0.7rem;font-size:0.82rem;color:#1a2e1b;line-height:1.6;"><b>Size:</b> {_html.escape(str(meth_res.get("sample_size","")))}<br><b>Strategy:</b> {_html.escape(meth_res.get("sampling_strategy",""))}<br><b>Software:</b> {_html.escape(meth_res.get("software",""))}</div>', unsafe_allow_html=True)
+            with mc3:
+                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.82rem;">📥 Data collection</p>', unsafe_allow_html=True)
+                for dc in meth_res.get("data_collection",[]):
+                    st.markdown(f'<div style="background:#f0f7f0;border-radius:6px;padding:0.35rem 0.7rem;margin-bottom:0.3rem;font-size:0.82rem;color:#1a2e1b;">• {_html.escape(dc)}</div>', unsafe_allow_html=True)
+
+            if meth_res.get("conceptual_framework_hint"):
+                st.markdown(f"""<div style="background:#f0f7f0;border-left:4px solid #3a8c3f;border-radius:0 8px 8px 0;
+                    padding:0.8rem 1rem;margin-top:0.8rem;font-size:0.85rem;color:#1a2e1b;line-height:1.6;">
+                  <b style="color:#1e5c22;">💡 Conceptual framework hint:</b><br>
+                  {_html.escape(meth_res.get("conceptual_framework_hint",""))}</div>""", unsafe_allow_html=True)
+
+            with st.expander("🔄 Alternative methodologies"):
+                for alt in meth_res.get("alternative_designs",[]):
+                    if isinstance(alt, dict):
+                        st.markdown(f"**{_html.escape(alt.get('name',''))}** — {_html.escape(alt.get('pros_cons',''))}")
+                    else:
+                        st.markdown(f"• {_html.escape(str(alt))}")
+
+            meth_text = f"""RECOMMENDED: {meth_res.get('recommended_approach','')} — {meth_res.get('design','')}
+
+RATIONALE:
+{meth_res.get('rationale','')}
+
+ANALYSIS TECHNIQUES:
+{chr(10).join('• '+t for t in meth_res.get('analysis_techniques',[]))}
+
+SAMPLE SIZE: {meth_res.get('sample_size','')}
+SAMPLING: {meth_res.get('sampling_strategy','')}
+SOFTWARE: {meth_res.get('software','')}
+
+DATA COLLECTION:
+{chr(10).join('• '+d for d in meth_res.get('data_collection',[]))}
+
+CONCEPTUAL FRAMEWORK HINT:
+{meth_res.get('conceptual_framework_hint','')}"""
+            make_copy_btn("meth-full", meth_text, "📋 Copy Methodology Report")
+
+    # ── S3: HYPOTHESIS GENERATOR ─────────────────────────────────────────────
+    with s3:
+        st.markdown('<div class="card-title">🔬 Hypothesis Generator</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Enter your research topic and key variables — get testable H0/H1 hypotheses with theoretical justification and variable classification.</p>', unsafe_allow_html=True)
+
+        hc1, hc2 = st.columns([3, 2])
+        with hc1:
+            hyp_topic = st.text_area("Research topic", height=100,
+                placeholder="e.g. Impact of ESG disclosure quality on firm valuation among BSE 500 companies during BRSR era",
+                label_visibility="visible", key="hyp_topic")
+        with hc2:
+            hyp_vars = st.text_area("Key variables (one per line)", height=100,
+                placeholder="ESG disclosure score\nFirm valuation (Tobin's Q)\nFirm size\nLeverage\nProfitability (ROA)",
+                label_visibility="visible", key="hyp_vars")
+
+        hyp_btn = st.button("🔬 Generate Hypotheses", type="primary",
+                            disabled=(not hyp_topic.strip() or not groq_key), key="hyp_btn")
+
+        hyp_res = st.session_state.hyp_result
+        if hyp_btn and hyp_topic.strip() and groq_key:
+            with st.spinner("Developing research hypotheses…"):
+                try:
+                    hyp_res = generate_hypotheses(groq_key, model_choice, hyp_topic, hyp_vars)
+                    st.session_state.hyp_result = hyp_res
+                    st.rerun()
+                except Exception as e: st.error(f"❌ {e}")
+
+        if hyp_res and "error" not in hyp_res:
+            st.markdown(f'<p style="color:#1e5c22;font-weight:700;margin-top:0.8rem;">Research question: {_html.escape(hyp_res.get("research_question",""))}</p>', unsafe_allow_html=True)
+
+            # Variable classification
+            vc = hyp_res.get("variable_classification", {})
+            if vc:
+                vcols = st.columns(4)
+                for col, (vtype, label) in zip(vcols, [("independent","Independent"),("dependent","Dependent"),("moderating","Moderating"),("mediating","Mediating")]):
+                    vars_list = vc.get(vtype, [])
+                    with col:
+                        items_html = "".join(f'<div style="font-size:0.78rem;color:#1a2e1b;margin-bottom:0.2rem;">• {_html.escape(str(v))}</div>' for v in vars_list)
+                        st.markdown(f'<div style="background:#f0f7f0;border-radius:8px;padding:0.6rem;"><div style="font-size:0.7rem;font-weight:700;color:#3a8c3f;text-transform:uppercase;margin-bottom:0.3rem;">{label}</div>{items_html}</div>', unsafe_allow_html=True)
+
+            # Hypotheses
+            h0s = hyp_res.get("null_hypotheses", [])
+            h1s = hyp_res.get("alternate_hypotheses", [])
+            rationale = hyp_res.get("directional_rationale", [])
+            st.markdown('<p style="color:#1e5c22;font-weight:700;margin-top:1rem;">Hypotheses</p>', unsafe_allow_html=True)
+
+            hyp_text_parts = [f"RESEARCH QUESTION:\n{hyp_res.get('research_question','')}\n"]
+            for i, (h0, h1) in enumerate(zip(h0s, h1s), 1):
+                rat = rationale[i-1] if i-1 < len(rationale) else ""
+                if isinstance(rat, dict): rat = rat.get("justification", str(rat))
+                st.markdown(f"""<div style="background:white;border:1px solid #b0d4b2;
+                    border-radius:10px;padding:0.8rem 1.1rem;margin-bottom:0.6rem;">
+                  <div style="display:flex;gap:0.5rem;align-items:flex-start;">
+                    <span style="background:#f0f7f0;color:#1e5c22;border-radius:20px;
+                           padding:0.1rem 0.6rem;font-size:0.72rem;font-weight:700;
+                           white-space:nowrap;margin-top:0.1rem;">H{i}</span>
+                    <div style="flex:1;">
+                      <div style="font-size:0.82rem;color:#9a8a7a;margin-bottom:0.2rem;">
+                        <b>H0:</b> {_html.escape(str(h0))}</div>
+                      <div style="font-size:0.85rem;color:#1a2e1b;font-weight:600;margin-bottom:0.3rem;">
+                        <b>H{i}:</b> {_html.escape(str(h1))}</div>
+                      <div style="font-size:0.78rem;color:#3d5e40;line-height:1.5;font-style:italic;">
+                        {_html.escape(str(rat))}</div>
+                    </div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+                hyp_text_parts.append(f"H{i}:\nH0: {h0}\nH1: {h1}\nJustification: {rat}\n")
+
+            make_copy_btn("hyp-full", "\n".join(hyp_text_parts), "📋 Copy All Hypotheses")
+
+    # ── S4: VARIABLE OPERATIONALISER ─────────────────────────────────────────
+    with s4:
+        st.markdown('<div class="card-title">📏 Variable Operationaliser & Scale Developer</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Enter a research variable and context — get a construct definition, validated scale items, reliability guidance, and measurement source.</p>', unsafe_allow_html=True)
+
+        vc1, vc2 = st.columns([1, 2])
+        with vc1:
+            var_name  = st.text_input("Variable name", placeholder="e.g. Financial Literacy", key="var_name")
+            var_ctx   = st.text_area("Research context", height=120,
+                placeholder="e.g. Measuring financial literacy of women micro-entrepreneurs in Kerala for a study on investment behaviour",
+                label_visibility="visible", key="var_ctx")
+            var_btn = st.button("📏 Operationalise", type="primary",
+                                disabled=(not var_name.strip() or not groq_key), key="var_btn")
+
+        var_res = st.session_state.var_result
+        if var_btn and var_name.strip() and groq_key:
+            with st.spinner(f"Operationalising '{var_name}'…"):
+                try:
+                    var_res = operationalise_variable(groq_key, model_choice, var_name, var_ctx)
+                    st.session_state.var_result = var_res
+                    st.rerun()
+                except Exception as e: st.error(f"❌ {e}")
+
+        with vc2:
+            if var_res and "error" not in var_res:
+                st.markdown(f"""<div style="background:#f0f7f0;border-radius:10px;padding:0.9rem 1.1rem;margin-bottom:0.8rem;">
+                  <div style="font-size:0.72rem;font-weight:700;color:#3a8c3f;text-transform:uppercase;letter-spacing:0.8px;">Construct definition</div>
+                  <div style="font-size:0.88rem;color:#1a2e1b;line-height:1.6;margin-top:0.3rem;">{_html.escape(var_res.get("construct_definition",""))}</div>
+                  <div style="font-size:0.78rem;color:#3d5e40;margin-top:0.5rem;"><b>Source:</b> {_html.escape(var_res.get("scale_source",""))} &nbsp;|&nbsp; <b>Response:</b> {_html.escape(var_res.get("response_format",""))}</div>
+                </div>""", unsafe_allow_html=True)
+
+                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.85rem;">Survey items (Likert scale)</p>', unsafe_allow_html=True)
+                items     = var_res.get("measurement_items", [])
+                rev_coded = var_res.get("reverse_coded_items", [])
+                var_text_parts = [f"VARIABLE: {var_res.get('variable','')}\n",
+                                   f"DEFINITION:\n{var_res.get('construct_definition','')}\n",
+                                   f"SOURCE: {var_res.get('scale_source','')}\n",
+                                   f"RESPONSE: {var_res.get('response_format','')}\n\nSURVEY ITEMS:"]
+                for i, item in enumerate(items, 1):
+                    is_rev = i in rev_coded or str(i) in rev_coded
+                    badge  = ' <span style="background:#e87a7a22;color:#e87a7a;border-radius:4px;padding:0.05rem 0.4rem;font-size:0.65rem;">R</span>' if is_rev else ''
+                    st.markdown(f"""<div style="background:white;border:1px solid #b0d4b2;border-radius:8px;
+                        padding:0.5rem 0.9rem;margin-bottom:0.3rem;font-size:0.85rem;color:#1a2e1b;
+                        display:flex;gap:0.6rem;align-items:center;">
+                      <span style="color:#3a8c3f;font-weight:700;min-width:20px;">{i}.</span>
+                      {_html.escape(str(item))}{badge}
+                    </div>""", unsafe_allow_html=True)
+                    var_text_parts.append(f"{i}. {item}{' [REVERSE CODED]' if is_rev else ''}")
+
+                st.markdown(f'<div style="font-size:0.78rem;color:#3d5e40;margin-top:0.5rem;">📋 Reliability: {_html.escape(var_res.get("reliability_note",""))}</div>', unsafe_allow_html=True)
+                make_copy_btn("var-full", "\n".join(var_text_parts), "📋 Copy Scale Items")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — PUBLICATION SUITE (Layer 5)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab6:
+    st.markdown("""<div style="background:linear-gradient(135deg,#1a2e1b,#1e5c22);border-radius:12px;
+        padding:1rem 1.5rem;margin-bottom:1.2rem;">
+      <div style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#fff;">
+        📰 Publication Suite</div>
+      <div style="font-size:0.85rem;color:rgba(255,255,255,0.65);margin-top:0.3rem;">
+        Journal matcher · Cover letter writer · Reviewer response drafter · Research contribution statement
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    import html as _html
+
+    p1, p2, p3, p4 = st.tabs([
+        "🎯 Journal Matcher",
+        "✉️ Cover Letter Writer",
+        "🔁 Reviewer Response",
+        "💡 Contribution Statement"
+    ])
+
+    # ── P1: JOURNAL MATCHER ──────────────────────────────────────────────────
+    with p1:
+        st.markdown('<div class="card-title">🎯 Journal Matcher — Scopus / ABDC / UGC CARE</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Paste your abstract and keywords to get ranked journal recommendations with indexing, impact factors, acceptance rates, and submission strategy.</p>', unsafe_allow_html=True)
+
+        jc1, jc2 = st.columns([2, 1])
+        with jc1:
+            jm_abstract = st.text_area("Abstract", height=180,
+                placeholder="Paste your paper abstract here…",
+                label_visibility="visible", key="jm_abstract")
+        with jc2:
+            jm_keywords = st.text_input("Keywords (comma-separated)", key="jm_keywords",
+                placeholder="financial literacy, women, Kerala, investment")
+            jm_field    = st.text_input("Research field", key="jm_field",
+                placeholder="e.g. Finance / Management / Social Science")
+            jm_btn = st.button("🎯 Find Matching Journals", type="primary",
+                               disabled=(not jm_abstract.strip() or not groq_key), key="jm_btn")
+
+        jm_res = st.session_state.journal_result
+        if jm_btn and jm_abstract.strip() and groq_key:
+            with st.spinner("Searching journal database…"):
+                try:
+                    jm_res = match_journals(groq_key, model_choice, jm_abstract, jm_keywords, jm_field)
+                    st.session_state.journal_result = jm_res
+                    st.rerun()
+                except Exception as e: st.error(f"❌ {e}")
+
+        if jm_res and "error" not in jm_res:
+            st.markdown(f'<p style="color:#1e5c22;font-weight:700;margin-top:0.8rem;">Domain detected: {_html.escape(jm_res.get("research_domain",""))}</p>', unsafe_allow_html=True)
+
+            INDEX_COLORS = {
+                "Scopus":   ("#e6f1fb","#0c447c"),
+                "ABDC A":   ("#1a2e1b","#6fcf97"),
+                "ABDC B":   ("#2d3a1e","#b5d97a"),
+                "ABDC C":   ("#3a3a1e","#e8d47a"),
+                "ABS":      ("#2d1a3a","#b87ae8"),
+                "UGC CARE": ("#3a1a1a","#e87a7a"),
+                "Web of Science": ("#1a1a3a","#7ab8e8"),
+            }
+            jm_text = [f"JOURNAL RECOMMENDATIONS — {jm_res.get('research_domain','')}\n"]
+            for j in jm_res.get("recommendations", []):
+                idx       = j.get("index","")
+                bg, txt   = INDEX_COLORS.get(idx, ("#f0f7f0","#1e5c22"))
+                st.markdown(f"""<div style="background:white;border:1px solid #b0d4b2;border-radius:10px;
+                    padding:0.9rem 1.1rem;margin-bottom:0.6rem;">
+                  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;">
+                    <div style="flex:1;">
+                      <div style="font-weight:700;color:#1a2e1b;font-size:0.92rem;">{_html.escape(j.get('name',''))}</div>
+                      <div style="font-size:0.78rem;color:#3d5e40;margin-top:0.1rem;">{_html.escape(j.get('publisher',''))}</div>
+                      <div style="font-size:0.82rem;color:#3d5e40;margin-top:0.4rem;line-height:1.5;">{_html.escape(j.get('scope_fit',''))}</div>
+                    </div>
+                    <div style="text-align:right;min-width:130px;">
+                      <span style="background:{bg};color:{txt};border-radius:12px;padding:0.2rem 0.7rem;
+                             font-size:0.7rem;font-weight:700;">{_html.escape(idx)}</span>
+                      <div style="font-size:0.75rem;color:#5a6a7a;margin-top:0.4rem;">IF: {_html.escape(str(j.get('impact_factor','')))} &nbsp;|&nbsp; {_html.escape(j.get('open_access',''))}</div>
+                      <div style="font-size:0.72rem;color:#9a8a7a;">Accept: {_html.escape(str(j.get('acceptance_rate','')))} &nbsp;|&nbsp; ~{_html.escape(str(j.get('turnaround','')))} wks</div>
+                    </div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+                jm_text.append(f"{j.get('name','')} [{idx}] IF:{j.get('impact_factor','')} | {j.get('scope_fit','')}")
+
+            if jm_res.get("strategy_note"):
+                st.markdown(f"""<div style="background:#f0f7f0;border-left:4px solid #3a8c3f;border-radius:0 8px 8px 0;
+                    padding:0.8rem 1rem;margin-top:0.5rem;font-size:0.85rem;color:#1a2e1b;line-height:1.6;">
+                  <b style="color:#1e5c22;">📌 Submission strategy:</b><br>{_html.escape(jm_res.get("strategy_note",""))}
+                </div>""", unsafe_allow_html=True)
+
+            if jm_res.get("avoid"):
+                with st.expander("⚠️ Journals to avoid"):
+                    for j in jm_res.get("avoid",[]):
+                        st.markdown(f"• {_html.escape(str(j))}")
+            make_copy_btn("jm-full", "\n".join(jm_text), "📋 Copy Journal List")
+
+    # ── P2: COVER LETTER WRITER ──────────────────────────────────────────────
+    with p2:
+        st.markdown('<div class="card-title">✉️ Journal Cover Letter Writer</div>', unsafe_allow_html=True)
+        cl1, cl2 = st.columns([1, 1])
+        with cl1:
+            cl_title   = st.text_input("Paper title", key="cl_title")
+            cl_journal = st.text_input("Target journal", key="cl_journal", placeholder="e.g. Journal of Finance Research")
+            cl_authors = st.text_input("Author(s)", key="cl_authors", placeholder="Dr. Niyas N, Dr. …")
+            cl_abstract= st.text_area("Abstract", height=140, key="cl_abstract",
+                placeholder="Paste abstract here…", label_visibility="visible")
+            cl_btn = st.button("✉️ Write Cover Letter", type="primary",
+                               disabled=(not cl_title.strip() or not cl_abstract.strip() or not groq_key), key="cl_btn")
+        with cl2:
+            cl_res = st.session_state.coverletter_result
+            if cl_btn and cl_title.strip() and groq_key:
+                with st.spinner("Drafting cover letter…"):
+                    try:
+                        cl_res = write_cover_letter(groq_key, model_choice, cl_title, cl_abstract, cl_journal, cl_authors)
+                        st.session_state.coverletter_result = cl_res
+                        st.rerun()
+                    except Exception as e: st.error(f"❌ {e}")
+            if cl_res and "error" not in cl_res:
+                letter = cl_res.get("cover_letter","")
+                st.markdown(f"""<div style="background:white;border:1.5px solid #3a8c3f;border-radius:10px;
+                    padding:1.2rem 1.4rem;font-size:0.88rem;color:#1a2e1b;line-height:1.75;
+                    max-height:420px;overflow-y:auto;white-space:pre-wrap;">{_html.escape(letter)}</div>""",
+                    unsafe_allow_html=True)
+                make_copy_btn("cl-letter", letter, "📋 Copy Cover Letter")
+                if cl_res.get("key_contributions"):
+                    with st.expander("Key contributions summary"):
+                        for kc in cl_res.get("key_contributions",[]):
+                            st.markdown(f"• {_html.escape(str(kc))}")
+            else:
+                st.markdown("""<div style="background:white;border:1.5px dashed #b0d4b2;border-radius:10px;
+                    min-height:300px;display:flex;align-items:center;justify-content:center;
+                    flex-direction:column;gap:0.5rem;color:#9a8a7a;">
+                  <div style="font-size:2rem;">✉️</div>
+                  <div style="font-size:0.9rem;">Cover letter will appear here</div>
+                </div>""", unsafe_allow_html=True)
+
+    # ── P3: REVIEWER RESPONSE DRAFTER ────────────────────────────────────────
+    with p3:
+        st.markdown('<div class="card-title">🔁 Reviewer Response Letter Drafter</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Paste the reviewer comments you received. Get a structured, professional point-by-point response letter ready to submit.</p>', unsafe_allow_html=True)
+
+        rc1, rc2 = st.columns([1, 1])
+        with rc1:
+            rv_abstract = st.text_area("Original abstract (for context)", height=120, key="rv_abstract",
+                placeholder="Paste your paper abstract…", label_visibility="visible")
+            rv_comments = st.text_area("Reviewer comments", height=220, key="rv_comments",
+                placeholder="Paste all reviewer comments here. Include both Reviewer 1 and Reviewer 2 comments.\n\nExample:\nREVIEWER 1:\n1. The sample size seems insufficient. Please justify.\n2. The literature review lacks recent papers (2020-2024).\n\nREVIEWER 2:\n1. The methodology section needs more detail on the SEM specification.",
+                label_visibility="visible")
+            rv_btn = st.button("🔁 Draft Response Letter", type="primary",
+                               disabled=(not rv_comments.strip() or not groq_key), key="rv_btn")
+        with rc2:
+            rv_res = st.session_state.reviewer_result
+            if rv_btn and rv_comments.strip() and groq_key:
+                with st.spinner("Drafting reviewer response…"):
+                    try:
+                        rv_res = draft_reviewer_response(groq_key, model_choice, rv_comments, rv_abstract)
+                        st.session_state.reviewer_result = rv_res
+                        st.rerun()
+                    except Exception as e: st.error(f"❌ {e}")
+
+            if rv_res and "error" not in rv_res:
+                st.markdown(f"""<div style="background:#f0f7f0;border-radius:8px;padding:0.8rem 1rem;
+                    margin-bottom:0.8rem;font-size:0.85rem;color:#1a2e1b;line-height:1.6;">
+                  {_html.escape(rv_res.get("response_header",""))}</div>""", unsafe_allow_html=True)
+
+                rv_full = [rv_res.get("response_header",""), ""]
+                type_colors_rv = {"grammar":"#e87a7a","spelling":"#e8a87a","comment":"#b0d4b2","point":"#b0d4b2"}
+                for resp in rv_res.get("responses", []):
+                    r_label   = resp.get("reviewer","")
+                    r_comment = resp.get("comment_summary","")
+                    r_response= resp.get("response","")
+                    r_change  = resp.get("manuscript_change","")
+                    st.markdown(f"""<div style="background:white;border:1px solid #b0d4b2;border-radius:10px;
+                        padding:0.8rem 1rem;margin-bottom:0.5rem;">
+                      <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.4rem;">
+                        <span style="background:#f0f7f0;color:#1e5c22;border-radius:4px;
+                               padding:0.1rem 0.6rem;font-size:0.7rem;font-weight:700;">{_html.escape(r_label)}</span>
+                        <span style="font-size:0.78rem;color:#3d5e40;font-style:italic;">{_html.escape(r_comment)}</span>
+                      </div>
+                      <div style="font-size:0.85rem;color:#1a2e1b;line-height:1.6;margin-bottom:0.4rem;">{_html.escape(r_response)}</div>
+                      <div style="font-size:0.78rem;color:#3a8c3f;"><b>Manuscript change:</b> {_html.escape(r_change)}</div>
+                    </div>""", unsafe_allow_html=True)
+                    rv_full.extend([f"[{r_label}] {r_comment}", f"Response: {r_response}", f"Change: {r_change}", ""])
+
+                st.markdown(f"""<div style="background:#f0f7f0;border-radius:8px;padding:0.8rem 1rem;
+                    font-size:0.85rem;color:#1a2e1b;line-height:1.6;">
+                  {_html.escape(rv_res.get("closing_paragraph",""))}</div>""", unsafe_allow_html=True)
+                make_copy_btn("rv-full", "\n".join(rv_full), "📋 Copy Response Letter")
+            else:
+                st.markdown("""<div style="background:white;border:1.5px dashed #b0d4b2;border-radius:10px;
+                    min-height:300px;display:flex;align-items:center;justify-content:center;
+                    flex-direction:column;gap:0.5rem;color:#9a8a7a;">
+                  <div style="font-size:2rem;">🔁</div>
+                  <div style="font-size:0.9rem;">Response letter will appear here</div>
+                </div>""", unsafe_allow_html=True)
+
+    # ── P4: CONTRIBUTION STATEMENT ───────────────────────────────────────────
+    with p4:
+        st.markdown('<div class="card-title">💡 Research Contribution Statement Generator</div>', unsafe_allow_html=True)
+        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Generate a publication-ready Research Contribution paragraph for thesis chapters, journal submissions, and conference papers.</p>', unsafe_allow_html=True)
+
+        csc1, csc2 = st.columns([1, 1])
+        with csc1:
+            cs_title   = st.text_input("Paper / Chapter title", key="cs_title")
+            cs_obj     = st.text_area("Research objectives (brief)", height=80, key="cs_obj",
+                placeholder="e.g. To examine the effect of ESG disclosure on firm valuation…", label_visibility="visible")
+            cs_findings= st.text_area("Key findings (brief)", height=80, key="cs_findings",
+                placeholder="e.g. ESG disclosure positively moderates the relationship…", label_visibility="visible")
+            cs_context = st.text_input("Study context / setting", key="cs_context",
+                placeholder="e.g. BSE 500 firms, India, 2018-2023, BRSR era")
+            cs_btn = st.button("💡 Generate Contribution Statement", type="primary",
+                               disabled=(not cs_title.strip() or not groq_key), key="cs_btn")
+        with csc2:
+            cs_res = st.session_state.contrib_result
+            if cs_btn and cs_title.strip() and groq_key:
+                with st.spinner("Writing contribution statement…"):
+                    try:
+                        cs_res = write_contribution_statement(groq_key, model_choice, cs_title, cs_obj, cs_findings, cs_context)
+                        st.session_state.contrib_result = cs_res
+                        st.rerun()
+                    except Exception as e: st.error(f"❌ {e}")
+
+            if cs_res and "error" not in cs_res:
+                st.markdown(f"""<div style="background:white;border:1.5px solid #3a8c3f;border-radius:10px;
+                    padding:1.1rem 1.3rem;font-size:0.9rem;color:#1a2e1b;line-height:1.75;
+                    margin-bottom:0.8rem;">{_html.escape(cs_res.get("full_statement",""))}</div>""",
+                    unsafe_allow_html=True)
+                make_copy_btn("cs-statement", cs_res.get("full_statement",""), "📋 Copy Statement")
+
+                cs_tabs = st.tabs(["Theoretical","Methodological","Practical","Gap addressed"])
+                for tab_cs, key_cs in zip(cs_tabs, ["theoretical_contribution","methodological_contribution","practical_contribution","gap_addressed"]):
+                    with tab_cs:
+                        st.markdown(f'<div style="font-size:0.85rem;color:#1a2e1b;line-height:1.65;padding:0.5rem 0;">{_html.escape(cs_res.get(key_cs,""))}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown("""<div style="background:white;border:1.5px dashed #b0d4b2;border-radius:10px;
+                    min-height:300px;display:flex;align-items:center;justify-content:center;
+                    flex-direction:column;gap:0.5rem;color:#9a8a7a;">
+                  <div style="font-size:2rem;">💡</div>
+                  <div style="font-size:0.9rem;">Contribution statement will appear here</div>
+                </div>""", unsafe_allow_html=True)
