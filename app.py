@@ -1106,6 +1106,295 @@ def write_contribution_statement(api_key: str, model: str, title: str,
     try: return json.loads(raw)
     except: return {"error": "Parse error", "raw": raw}
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LITERATURE REVIEW CHAPTER WRITER
+# ══════════════════════════════════════════════════════════════════════════════
+
+LIT_REVIEW_WRITER_SYSTEM = """You are a senior academic writer with expertise in producing
+comprehensive, publication-quality literature review chapters for PhD dissertations and
+journal articles. You write in flowing scholarly prose — no bullet points, no headers
+unless requested, no numbered lists in the body.
+
+Given structured summaries of research articles, write a complete Literature Review chapter
+following these conventions:
+- Thematically organised paragraphs grouping related studies
+- Critical synthesis — compare, contrast, and evaluate studies; do NOT just summarise each one
+- Identify research gaps, contradictions, and agreements across studies
+- Appropriate scholarly hedging and academic register
+- Smooth transitions between paragraphs and sections
+- Every claim attributed to a specific author using the citation style specified
+- References section at the end in the exact citation style specified
+
+CITATION STYLES:
+- APA 7th:    (Author, Year) in-text;  Author, A. (Year). Title. Journal, Vol(Issue), pages. https://doi.org/xxx
+- MLA 9th:    (Author page) in-text;   Author. "Title." Journal, vol. X, no. Y, Year, pp. Z-Z.
+- Chicago 17th: (Author Year) in-text; Author. "Title." Journal X, no. Y (Year): Z-Z.
+- Harvard:    (Author Year) in-text;   Author (Year) 'Title', Journal, Vol(Issue), pp. Z-Z.
+- Vancouver:  [1] superscript in-text; 1. Author. Title. Journal. Year;Vol(Issue):pages.
+- IEEE:       [1] superscript in-text; [1] Author, "Title," Journal, vol. X, no. Y, pp. Z-Z, Year.
+
+Return ONLY the formatted chapter text — no preamble, no meta-commentary.
+Start directly with the chapter content. Include a REFERENCES section at the end."""
+
+def write_literature_review_chapter(api_key: str, model: str, articles: list,
+                                     citation_style: str, research_topic: str,
+                                     word_limit: int, extra_instructions: str) -> str:
+    """Generate a full literature review chapter from article summaries."""
+
+    # Build structured article list for the prompt
+    articles_block = ""
+    for i, art in enumerate(articles, 1):
+        authors = art.get("authors", [])
+        if isinstance(authors, list):
+            authors_str = "; ".join(authors) if authors else "Unknown"
+        else:
+            authors_str = str(authors)
+        findings = art.get("major_findings", [])
+        if isinstance(findings, list):
+            findings_str = " ".join(f"({j}) {f}" for j,f in enumerate(findings, 1))
+        else:
+            findings_str = str(findings)
+        articles_block += f"""
+ARTICLE {i}:
+  Title:       {art.get("title", "Unknown")}
+  Authors:     {authors_str}
+  Year:        {art.get("year", "n.d.")}
+  Journal:     {art.get("journal", "")}
+  DOI:         {art.get("doi", "")}
+  Objectives:  {art.get("main_objectives", "")}
+  Methodology: {art.get("methodology", "")}
+  Findings:    {findings_str}
+  Keywords:    {", ".join(art.get("keywords", [])) if isinstance(art.get("keywords",[]), list) else ""}
+  Limitations: {art.get("limitations", "")}
+  Conclusion:  {art.get("conclusion", "")}
+"""
+
+    user_msg = f"""RESEARCH TOPIC / CHAPTER FOCUS:
+{research_topic}
+
+CITATION STYLE: {citation_style}
+TARGET WORD COUNT: approximately {word_limit} words
+EXTRA INSTRUCTIONS: {extra_instructions if extra_instructions.strip() else "None"}
+
+ARTICLES TO SYNTHESISE:
+{articles_block}
+
+Write the complete literature review chapter now. Organise thematically, synthesise critically,
+cite every claim using {citation_style} style in-text, and include a full References section at the end.
+Do NOT use bullet points or numbered lists in the body text."""
+
+    # Use long-context model for large reviews
+    resp = call_groq(api_key, model, LIT_REVIEW_WRITER_SYSTEM, user_msg,
+                     max_tokens=4096, stream=False)
+    return resp.json()["choices"][0]["message"]["content"].strip()
+
+
+def build_literature_review_docx(chapter_text: str, topic: str, citation_style: str,
+                                  article_count: int) -> bytes:
+    """Build a Word document from the literature review chapter text using python-docx."""
+    try:
+        from docx import Document as DocxDoc
+        from docx.shared import Pt, Inches, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        import io, re
+
+        doc = DocxDoc()
+
+        # ── Page margins ────────────────────────────────────────────
+        section = doc.sections[0]
+        section.top_margin    = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin   = Inches(1.25)
+        section.right_margin  = Inches(1.25)
+
+        # ── Styles ──────────────────────────────────────────────────
+        normal_style   = doc.styles["Normal"]
+        normal_style.font.name = "Times New Roman"
+        normal_style.font.size = Pt(12)
+
+        # ── Title page ──────────────────────────────────────────────
+        title_para = doc.add_paragraph()
+        title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = title_para.add_run("LITERATURE REVIEW")
+        run.bold = True
+        run.font.size = Pt(16)
+        run.font.color.rgb = RGBColor(0x1E, 0x5C, 0x22)  # Zodha green
+        run.font.name = "Times New Roman"
+
+        subtitle = doc.add_paragraph()
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        sr = subtitle.add_run(topic if topic.strip() else "Systematic Literature Review")
+        sr.bold = True
+        sr.font.size = Pt(13)
+        sr.font.name = "Times New Roman"
+
+        meta = doc.add_paragraph()
+        meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        mr = meta.add_run(
+            f"Citation Style: {citation_style}  |  Articles Reviewed: {article_count}  |  "
+            f"Generated by Zodha Research Writing Pro"
+        )
+        mr.font.size = Pt(10)
+        mr.font.color.rgb = RGBColor(0x3D, 0x5E, 0x40)
+        mr.font.name = "Times New Roman"
+
+        doc.add_paragraph()  # spacer
+
+        # ── Parse and render chapter ─────────────────────────────────
+        # Split into lines and handle formatting
+        lines = chapter_text.split("\n")
+        i = 0
+        in_references = False
+
+        while i < len(lines):
+            line = lines[i].strip()
+            i += 1
+
+            if not line:
+                continue
+
+            # Detect section headings (ALL CAPS lines or lines starting with #)
+            is_heading = (
+                (line.isupper() and len(line) > 4 and len(line) < 80) or
+                line.startswith("# ") or line.startswith("## ") or
+                line.upper() == line and 5 < len(line) < 60
+            )
+            is_references = any(kw in line.upper() for kw in
+                                 ["REFERENCES", "BIBLIOGRAPHY", "WORKS CITED"])
+
+            if is_references:
+                in_references = True
+                ref_para = doc.add_paragraph()
+                ref_run  = ref_para.add_run(line.lstrip("# "))
+                ref_run.bold = True
+                ref_run.font.size = Pt(13)
+                ref_run.font.color.rgb = RGBColor(0x1E, 0x5C, 0x22)
+                ref_run.font.name = "Times New Roman"
+                continue
+
+            if is_heading and not in_references:
+                h_para = doc.add_paragraph()
+                h_run  = h_para.add_run(line.lstrip("# "))
+                h_run.bold = True
+                h_run.font.size = Pt(13)
+                h_run.font.color.rgb = RGBColor(0x1E, 0x5C, 0x22)
+                h_run.font.name = "Times New Roman"
+                continue
+
+            # Normal paragraph
+            p = doc.add_paragraph()
+            if not in_references:
+                p.paragraph_format.first_line_indent = Inches(0.5)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.space_before = Pt(0)
+                # Double spacing for body
+                p.paragraph_format.line_spacing = Pt(24)
+            else:
+                # Hanging indent for references
+                p.paragraph_format.left_indent     = Inches(0.5)
+                p.paragraph_format.first_line_indent = Inches(-0.5)
+                p.paragraph_format.space_after = Pt(6)
+                p.paragraph_format.line_spacing = Pt(24)
+
+            run = p.add_run(line)
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(12)
+
+        # ── Footer ──────────────────────────────────────────────────
+        footer = section.footer
+        footer_para = footer.paragraphs[0]
+        footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        footer_run = footer_para.add_run("Zodha Research Writing Pro · Generated Literature Review")
+        footer_run.font.size = Pt(9)
+        footer_run.font.color.rgb = RGBColor(0x9A, 0x8A, 0x7A)
+        footer_run.font.name = "Times New Roman"
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+
+    except ImportError:
+        # python-docx not available — return plain text as bytes
+        return chapter_text.encode("utf-8")
+
+
+def parse_excel_to_articles(excel_bytes) -> list:
+    """Parse a Zodha Literature Review Excel file back into article dicts."""
+    if not XLSX_OK:
+        return []
+    try:
+        from openpyxl import load_workbook
+        import io as _io3
+        wb = load_workbook(_io3.BytesIO(excel_bytes), read_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+
+        # Find header row (row 3 in our format: #, Title, Authors, Year, Journal,
+        # Main Objectives, Methodology, Major Findings, Keywords, DOI / URL)
+        header_row_idx = None
+        for i, row in enumerate(rows):
+            if row and str(row[0]).strip() == "#":
+                header_row_idx = i
+                break
+        if header_row_idx is None:
+            # Try to auto-detect by looking for "Title" in row
+            for i, row in enumerate(rows):
+                if row and any(str(c).strip().lower() == "title" for c in row if c):
+                    header_row_idx = i
+                    break
+
+        if header_row_idx is None:
+            return []
+
+        headers = [str(h).strip().lower() if h else "" for h in rows[header_row_idx]]
+
+        def get_col(row, name_fragments):
+            for frag in name_fragments:
+                for j, h in enumerate(headers):
+                    if frag in h:
+                        val = row[j] if j < len(row) else None
+                        return str(val).strip() if val and str(val) != "None" else ""
+            return ""
+
+        articles = []
+        for row in rows[header_row_idx + 1:]:
+            if not row or not any(row):
+                continue
+            title = get_col(row, ["title"])
+            if not title or title == "#":
+                continue
+            authors_raw = get_col(row, ["author"])
+            # Split by ; or ,
+            if ";" in authors_raw:
+                authors = [a.strip() for a in authors_raw.split(";") if a.strip()]
+            elif authors_raw:
+                authors = [authors_raw]
+            else:
+                authors = []
+            findings_raw = get_col(row, ["finding", "major finding"])
+            findings = [f.lstrip("•- ").strip() for f in findings_raw.split("\n") if f.strip()]
+            doi_raw = get_col(row, ["doi", "url"])
+            doi = doi_raw.replace("https://doi.org/","").strip() if doi_raw else ""
+            articles.append({
+                "title":           title,
+                "authors":         authors,
+                "year":            get_col(row, ["year"]),
+                "journal":         get_col(row, ["journal", "source"]),
+                "doi":             doi,
+                "main_objectives": get_col(row, ["objective"]),
+                "methodology":     get_col(row, ["methodology", "method"]),
+                "major_findings":  findings if findings else [get_col(row, ["finding"])],
+                "keywords":        [k.strip() for k in get_col(row, ["keyword"]).split(";") if k.strip()],
+                "limitations":     "",
+                "conclusion":      "",
+            })
+        return articles
+    except Exception as e:
+        return []
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG & CSS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1165,6 +1454,7 @@ for k,v in [("output_text",""),("paraphrase_out",""),
              ("grammar_corrected",""),("grammar_issues",[]),
              ("clear_input",False),("show_admin",False),("admin_auth",False),
              ("spss_result",{}),("method_result",{}),("hyp_result",{}),("var_result",{}),
+             ("lit_chapter_text",""),("lit_chapter_topic",""),("lit_chapter_style","APA 7th"),
              ("journal_result",{}),("coverletter_result",{}),
              ("reviewer_result",{}),("contrib_result",{})]:
     if k not in st.session_state: st.session_state[k]=v
@@ -1568,10 +1858,11 @@ with tab3:
 # TAB 4 — RESEARCH TOOLS
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
-    r_tab1, r_tab2, r_tab3 = st.tabs([
+    r_tab1, r_tab2, r_tab3, r_tab4 = st.tabs([
         "📖 Citation Manager",
         "📄 Article Summariser",
-        "📚 Literature Review"
+        "📚 Literature Review",
+        "✍️ LR Chapter Writer"
     ])
 
     # ════════════════════════════════════════════════════════════════════════
@@ -1953,6 +2244,232 @@ KEYWORDS: {", ".join(s.get("keywords",[]))}
               <div style="font-size:2rem;">📚</div>
               <div style="font-size:0.9rem;">No articles yet — upload PDFs or add from the Summariser tab</div>
             </div>""", unsafe_allow_html=True)
+
+
+    # ════════════════════════════════════════════════════════════════════════
+    # R-TAB 4 — LITERATURE REVIEW CHAPTER WRITER
+    # ════════════════════════════════════════════════════════════════════════
+    with r_tab4:
+        import html as _html
+        st.markdown('''<div style="background:linear-gradient(135deg,#1a2e1b,#1e5c22);
+            border-radius:12px;padding:1rem 1.5rem;margin-bottom:1.2rem;">
+          <div style="font-family:'Playfair Display',serif;font-size:1.2rem;font-weight:700;color:#ffffff;">
+            ✍️ Literature Review Chapter Writer</div>
+          <div style="font-size:0.85rem;color:rgba(255,255,255,0.65);margin-top:0.3rem;">
+            Synthesise all articles in your review into a complete, citation-rich scholarly chapter
+            — download as Word document (.docx)
+          </div>
+        </div>''', unsafe_allow_html=True)
+
+        arts_for_writer = st.session_state.get("lit_review_articles", [])
+
+        # ── EXCEL IMPORT (always shown at top) ──────────────────────────────
+        with st.expander("📊 Import articles from Excel sheet", expanded=(not arts_for_writer)):
+            st.markdown('<p style="color:rgba(255,255,255,0.75);font-size:0.85rem;">'
+                        'Upload the Excel file you downloaded from the Literature Review tab. '
+                        'Articles will be added to your review list automatically.</p>',
+                        unsafe_allow_html=True)
+            excel_upload = st.file_uploader(
+                "Upload Literature Review Excel",
+                type=["xlsx"], key="lr_excel_import",
+                label_visibility="collapsed",
+                help="Upload the .xlsx generated by the Literature Review Manager"
+            )
+            if excel_upload:
+                if st.button("📥 Import articles from Excel", type="primary", key="import_excel_btn"):
+                    with st.spinner("Parsing Excel…"):
+                        imported = parse_excel_to_articles(excel_upload.read())
+                    if imported:
+                        existing = st.session_state.get("lit_review_articles", [])
+                        # Avoid duplicates by title
+                        existing_titles = {a.get("title","").lower() for a in existing}
+                        new_arts = [a for a in imported if a.get("title","").lower() not in existing_titles]
+                        st.session_state.lit_review_articles = existing + new_arts
+                        arts_for_writer = st.session_state.lit_review_articles
+                        st.success(f"✅ Imported {len(new_arts)} article(s) from Excel. "
+                                   f"Total: {len(arts_for_writer)}")
+                        st.rerun()
+                    else:
+                        st.error("❌ Could not parse Excel. Make sure it's a Zodha Literature Review export.")
+
+        if not arts_for_writer:
+            st.markdown('''<div style="background:white;border:1.5px dashed #b0d4b2;border-radius:10px;
+                 min-height:160px;display:flex;align-items:center;justify-content:center;
+                 flex-direction:column;gap:0.5rem;color:#3d5e40;padding:2rem;">
+              <div style="font-size:2rem;">📚</div>
+              <div style="font-size:0.95rem;font-weight:600;">No articles yet</div>
+              <div style="font-size:0.85rem;color:#9a8a7a;text-align:center;">
+                Import from Excel above, add via <b>Article Summariser</b>, or upload PDFs in
+                the <b>Literature Review</b> tab.
+              </div>
+            </div>''', unsafe_allow_html=True)
+        else:
+            # ── Configuration row ───────────────────────────────────────────
+            st.markdown(f'<p style="color:#ffffff;font-weight:700;">'
+                        f'📋 {len(arts_for_writer)} article(s) ready for synthesis</p>',
+                        unsafe_allow_html=True)
+
+            # Article list preview
+            with st.expander(f"View articles in review ({len(arts_for_writer)})"):
+                for idx_a, a in enumerate(arts_for_writer, 1):
+                    authors_preview = ", ".join(a.get("authors",[])[:2]) if isinstance(a.get("authors",[]),list) else ""
+                    st.markdown(f'<div style="font-size:0.82rem;color:#1a2e1b;margin-bottom:0.2rem;">'
+                                f'<b>{idx_a}.</b> {_html.escape(a.get("title","Untitled")[:70])} '
+                                f'— <span style="color:#3a8c3f;">{_html.escape(authors_preview)}</span> '
+                                f'({_html.escape(str(a.get("year","")))})</div>', unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Settings ────────────────────────────────────────────────────
+            lw_c1, lw_c2 = st.columns([2, 1])
+            with lw_c1:
+                lw_topic = st.text_area(
+                    "Chapter focus / research topic",
+                    height=90,
+                    placeholder="e.g. The role of financial literacy in women's investment behaviour "
+                                "in emerging economies — focusing on India, Kerala, SHG context",
+                    key="lw_topic", label_visibility="visible"
+                )
+                lw_extra = st.text_area(
+                    "Additional instructions (optional)",
+                    height=70,
+                    placeholder="e.g. Organise thematically into: (1) Financial Literacy & Investment, "
+                                "(2) Gender & Finance, (3) Methodology gaps. Emphasise Indian context. "
+                                "Include a paragraph on research gaps.",
+                    key="lw_extra", label_visibility="visible"
+                )
+            with lw_c2:
+                lw_citation = st.selectbox(
+                    "Citation style",
+                    ["APA 7th", "MLA 9th", "Chicago 17th", "Harvard", "Vancouver", "IEEE"],
+                    key="lw_citation"
+                )
+                lw_words = st.select_slider(
+                    "Target word count",
+                    options=[800, 1000, 1200, 1500, 2000, 2500, 3000],
+                    value=1500, key="lw_words"
+                )
+                st.markdown(f'<div style="font-size:0.78rem;color:rgba(255,255,255,0.6);">'
+                            f'~{lw_words} words · {lw_citation} · {len(arts_for_writer)} sources</div>',
+                            unsafe_allow_html=True)
+
+            lw_btn = st.button(
+                f"✍️ Write Literature Review Chapter ({lw_words} words · {lw_citation})",
+                type="primary", use_container_width=True, key="lw_btn",
+                disabled=(not lw_topic.strip() or not groq_key)
+            )
+            if not groq_key:
+                st.caption("⚙️ Service key not configured.")
+
+            # ── Generate ────────────────────────────────────────────────────
+            if lw_btn and lw_topic.strip() and groq_key:
+                with st.spinner(f"Writing literature review chapter — synthesising {len(arts_for_writer)} articles…"):
+                    try:
+                        chapter = write_literature_review_chapter(
+                            groq_key, model_choice, arts_for_writer,
+                            lw_citation, lw_topic, lw_words, lw_extra
+                        )
+                        st.session_state.lit_chapter_text  = chapter
+                        st.session_state.lit_chapter_topic = lw_topic
+                        st.session_state.lit_chapter_style = lw_citation
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ {e}")
+
+            # ── Display chapter ─────────────────────────────────────────────
+            chapter_text = st.session_state.get("lit_chapter_text", "")
+            if chapter_text:
+                st.markdown("---")
+
+                # Stats
+                words_in_chapter = len(chapter_text.split())
+                # Split body vs references
+                ref_split = chapter_text.upper().find("REFERENCES")
+                body_text = chapter_text[:ref_split] if ref_split > 0 else chapter_text
+                ref_text  = chapter_text[ref_split:] if ref_split > 0 else ""
+                ref_count = ref_text.count("\n") - 2 if ref_text else 0
+
+                sc1, sc2, sc3 = st.columns(3)
+                for col_s, label_s, val_s in [
+                    (sc1, "Total words",     f"{words_in_chapter:,}"),
+                    (sc2, "References",      f"~{max(0,ref_count)} entries"),
+                    (sc3, "Citation style",  st.session_state.get("lit_chapter_style","APA 7th")),
+                ]:
+                    col_s.markdown(f'''<div style="background:#f0f7f0;border:1px solid #b0d4b2;
+                         border-radius:8px;padding:0.7rem;text-align:center;">
+                      <div style="font-size:0.7rem;color:#3d5e40;text-transform:uppercase;letter-spacing:0.8px;">{label_s}</div>
+                      <div style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#1a2e1b;">{val_s}</div>
+                    </div>''', unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Chapter preview
+                st.markdown('<p style="color:#ffffff;font-weight:700;">📄 Chapter Preview</p>', unsafe_allow_html=True)
+                preview_lines = chapter_text.split("\n")[:60]
+                preview_text  = "\n".join(preview_lines)
+                if len(chapter_text.split("\n")) > 60:
+                    preview_text += "\n\n[… scroll down in the full document …]"
+                preview_style = (
+                    'background:white;border:1.5px solid #3a8c3f;border-radius:10px;'
+                    'padding:1.5rem 1.8rem;font-family:"Times New Roman",serif;font-size:0.92rem;'
+                    'line-height:1.85;color:#1a2e1b;max-height:500px;overflow-y:auto;white-space:pre-wrap;'
+                )
+                st.markdown(
+                    f'<div style="{preview_style}">' + _html.escape(preview_text) + '</div>',
+                    unsafe_allow_html=True
+                )
+
+                # ── Download buttons ──────────────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                dl1, dl2, dl3 = st.columns([1, 1, 1])
+
+                # TXT download
+                with dl1:
+                    fname_txt = f"literature_review_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+                    st.download_button(
+                        "⬇️ Download as .txt",
+                        data=chapter_text.encode("utf-8"),
+                        file_name=fname_txt,
+                        mime="text/plain",
+                        use_container_width=True, key="dl_lr_txt"
+                    )
+
+                # Word download
+                with dl2:
+                    with st.spinner("Building Word document…"):
+                        docx_bytes = build_literature_review_docx(
+                            chapter_text,
+                            st.session_state.get("lit_chapter_topic","Literature Review"),
+                            st.session_state.get("lit_chapter_style","APA 7th"),
+                            len(arts_for_writer)
+                        )
+                    fname_docx = f"literature_review_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+                    if isinstance(docx_bytes, bytes) and docx_bytes[:4] == b'PK\x03\x04':
+                        st.download_button(
+                            "⬇️ Download as .docx",
+                            data=docx_bytes,
+                            file_name=fname_docx,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True, key="dl_lr_docx"
+                        )
+                    else:
+                        # Fallback: txt
+                        st.download_button(
+                            "⬇️ Download as .txt (install python-docx for .docx)",
+                            data=docx_bytes,
+                            file_name=fname_txt,
+                            mime="text/plain",
+                            use_container_width=True, key="dl_lr_txt_fb"
+                        )
+
+                # Copy
+                with dl3:
+                    make_copy_btn("lr-chapter", chapter_text, "📋 Copy Text")
+
+                # Regenerate
+                if st.button("🔄 Regenerate Chapter", use_container_width=True, key="lw_regen"):
+                    st.session_state.lit_chapter_text = ""
+                    st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
