@@ -1100,7 +1100,7 @@ html,body,[class*="css"]{font-family:'DM Sans',sans-serif;background-color:#ffff
 .hero-title{font-family:'Playfair Display',serif;font-size:2.2rem;font-weight:900;color:#ffffff;margin:0 0 0.2rem;position:relative;}
 .hero-sub{font-size:0.9rem;color:rgba(255,255,255,0.6);margin:0;position:relative;}
 .hero-badge{position:absolute;top:1.2rem;right:2rem;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.5);color:#ffffff;border-radius:20px;padding:0.3rem 0.9rem;font-size:0.75rem;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;}
-.card-title{font-family:'Playfair Display',serif;font-size:1.05rem;font-weight:700;color:#1e5c22!important;margin-bottom:0.8rem;padding-bottom:0.5rem;border-bottom:2px solid #3a8c3f;}
+.card-title{font-family:'Playfair Display',serif;font-size:1.05rem;font-weight:700;color:#ffffff!important;margin-bottom:0.8rem;padding-bottom:0.5rem;border-bottom:2px solid #4caf50;}
 .score-ring-wrap{display:flex;flex-direction:column;align-items:center;gap:0.3rem;}
 .score-ring{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:1.5rem;font-weight:900;}
 .score-label{font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#3d5e40;text-align:center;}
@@ -1336,7 +1336,7 @@ style="background:#1a2e1b;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
 
         if input_text.strip():
             scores_in = compute_scores(input_text, style)
-            st.markdown('<p style="color:#1e5c22;font-weight:700;margin-top:0.6rem;">Before — Humanness</p>', unsafe_allow_html=True)
+            st.markdown('<p style="color:#ffffff;font-weight:700;margin-top:0.6rem;">Before — Humanness</p>', unsafe_allow_html=True)
             r1,r2,r3,r4=st.columns(4)
             with r1: st.markdown(render_score_ring(scores_in["humanness"],"Humanness"),unsafe_allow_html=True)
             with r2: st.markdown(render_score_ring(scores_in["flesch"],"Readability"),unsafe_allow_html=True)
@@ -1358,7 +1358,7 @@ style="background:#1a2e1b;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
             scores_out = compute_scores(output_text, style)
             wc_out = scores_out.get("word_count",0)
             st.markdown(f'<span class="wc-badge">📝 {wc_out:,} words</span>', unsafe_allow_html=True)
-            st.markdown('<p style="color:#1e5c22;font-weight:700;margin-top:0.6rem;">After — Humanness</p>', unsafe_allow_html=True)
+            st.markdown('<p style="color:#ffffff;font-weight:700;margin-top:0.6rem;">After — Humanness</p>', unsafe_allow_html=True)
             r1,r2,r3,r4=st.columns(4)
             with r1: st.markdown(render_score_ring(scores_out["humanness"],"Humanness"),unsafe_allow_html=True)
             with r2: st.markdown(render_score_ring(scores_out["flesch"],"Readability"),unsafe_allow_html=True)
@@ -1537,7 +1537,7 @@ with tab4:
     # ════════════════════════════════════════════════════════════════════════
     with r_tab1:
         st.markdown('<div class="card-title">📖 Citation Manager</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#5a6a7a;font-size:0.88rem;">Enter a DOI or DOI URL to fetch metadata and generate a formatted citation.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Enter a DOI or DOI URL to fetch metadata and generate a formatted citation.</p>', unsafe_allow_html=True)
 
         ci_col1, ci_col2 = st.columns([3, 1])
         with ci_col1:
@@ -1653,7 +1653,7 @@ with tab4:
     # ════════════════════════════════════════════════════════════════════════
     with r_tab2:
         st.markdown('<div class="card-title">📄 Research Article Summariser</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#5a6a7a;font-size:0.88rem;">Paste article text or upload a PDF to extract: Title · Authors · Year · Objectives · Methodology · Major Findings</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Paste article text or upload a PDF to extract: Title · Authors · Year · Objectives · Methodology · Major Findings</p>', unsafe_allow_html=True)
 
         if "article_summary" not in st.session_state: st.session_state.article_summary = {}
 
@@ -1821,7 +1821,7 @@ KEYWORDS: {", ".join(s.get("keywords",[]))}
     # ════════════════════════════════════════════════════════════════════════
     with r_tab3:
         st.markdown('<div class="card-title">📚 Literature Review Manager</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#5a6a7a;font-size:0.88rem;">Upload multiple PDFs or add articles from the Summariser tab. Download a comprehensive literature review table as Excel.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Upload multiple PDFs or add articles from the Summariser tab. Download a comprehensive literature review table as Excel.</p>', unsafe_allow_html=True)
 
         if "lit_review_articles" not in st.session_state:
             st.session_state.lit_review_articles = []
@@ -1989,27 +1989,61 @@ with tab5:
     # ── S1: SPSS OUTPUT INTERPRETER ─────────────────────────────────────────
     with s1:
         st.markdown('<div class="card-title">📉 SPSS / AMOS / SmartPLS Output Interpreter</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Paste raw statistical output — regression tables, SEM fit indices, factor loadings, ANOVA tables — and get publication-ready Results section prose.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Paste raw statistical output — regression tables, SEM fit indices, factor loadings, ANOVA tables — and get publication-ready Results section prose.</p>', unsafe_allow_html=True)
 
-        spss_input = st.text_area("SPSS output", height=220,
-            placeholder="Paste your SPSS/AMOS/SmartPLS output here...\n\nExample:\nModel Summary\nR = .742  R² = .551  Adjusted R² = .538  F(3,146) = 59.87  p < .001\n\nCoefficients:\nBeta  t    Sig.\nFinancial Literacy  .412  6.23  .000\nRisk Perception    .287  4.11  .001",
-            label_visibility="collapsed", key="spss_input")
+        spss_src_a, spss_src_b = st.tabs(["✏️ Paste Output", "📎 Upload File"])
+        spss_input = ""
+        with spss_src_a:
+            spss_input = st.text_area("SPSS output", height=200,
+                placeholder="Paste your SPSS/AMOS/SmartPLS output here...\n\nExample:\nModel Summary\nR = .742  R² = .551  Adjusted R² = .538  F(3,146) = 59.87  p < .001\n\nCoefficients:\nBeta  t    Sig.\nFinancial Literacy  .412  6.23  .000\nRisk Perception    .287  4.11  .001",
+                label_visibility="collapsed", key="spss_input_paste")
+        with spss_src_b:
+            spss_file = st.file_uploader(
+                "Upload SPSS output file",
+                type=["txt","csv","pdf","docx","doc"],
+                label_visibility="collapsed", key="spss_upload",
+                help="Supported: .txt  .csv  .pdf  .docx"
+            )
+            if spss_file:
+                file_ext = spss_file.name.split(".")[-1].lower()
+                if file_ext in ("txt","csv"):
+                    spss_input = spss_file.read().decode("utf-8", errors="ignore")
+                elif file_ext == "pdf" and PDF_OK:
+                    import io as _io
+                    with pdfplumber.open(_io.BytesIO(spss_file.read())) as _pdf:
+                        spss_input = "\n".join(p.extract_text() or "" for p in _pdf.pages[:20])
+                elif file_ext in ("docx","doc"):
+                    try:
+                        import docx as _docx
+                        import io as _io
+                        doc = _docx.Document(_io.BytesIO(spss_file.read()))
+                        spss_input = "\n".join(p.text for p in doc.paragraphs)
+                    except ImportError:
+                        # fallback: read raw text bytes
+                        spss_input = spss_file.read().decode("utf-8", errors="ignore")
+                if spss_input.strip():
+                    st.success(f"✅ Loaded: {spss_file.name} ({len(spss_input.split()):,} words)")
+                    with st.expander("Preview extracted text"):
+                        st.text(spss_input[:600] + ("…" if len(spss_input) > 600 else ""))
+
+        # Use paste if filled, else use file
+        spss_final = (st.session_state.get("spss_input_paste","") or spss_input).strip()
 
         spss_btn = st.button("🔍 Interpret Output", type="primary",
-                             disabled=(not spss_input.strip() or not groq_key), key="spss_btn")
+                             disabled=(not spss_final or not groq_key), key="spss_btn")
         if not groq_key: st.caption("🔑 Add Groq API key in sidebar.")
 
         spss_res = st.session_state.spss_result
-        if spss_btn and spss_input.strip() and groq_key:
+        if spss_btn and spss_final and groq_key:
             with st.spinner("Interpreting statistical output…"):
                 try:
-                    spss_res = interpret_spss_output(groq_key, model_choice, spss_input)
+                    spss_res = interpret_spss_output(groq_key, model_choice, spss_final)
                     st.session_state.spss_result = spss_res
                     st.rerun()
                 except Exception as e: st.error(f"❌ {e}")
 
         if spss_res and "error" not in spss_res:
-            st.markdown(f'<p style="color:#1e5c22;font-weight:700;margin-top:0.8rem;">Test detected: {_html.escape(spss_res.get("test_type",""))}</p>', unsafe_allow_html=True)
+            st.markdown(f'<p style="color:#ffffff;font-weight:700;margin-top:0.8rem;">Test detected: {_html.escape(spss_res.get("test_type",""))}</p>', unsafe_allow_html=True)
 
             col_a, col_b = st.columns(2)
             with col_a:
@@ -2073,19 +2107,52 @@ LIMITATIONS:
     # ── S2: METHODOLOGY RECOMMENDER ─────────────────────────────────────────
     with s2:
         st.markdown('<div class="card-title">🧪 Research Methodology Recommender</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Describe your research topic, objectives, and context — get a detailed methodology recommendation with sample size, sampling strategy, and analysis techniques.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Describe your research topic, objectives, and context — get a detailed methodology recommendation with sample size, sampling strategy, and analysis techniques.</p>', unsafe_allow_html=True)
 
-        meth_input = st.text_area("Research description", height=180,
-            placeholder="Describe your research. Example:\n\nI am studying the impact of financial literacy and digital banking adoption on the investment behaviour of women micro-entrepreneurs in Kerala. I want to understand causal relationships between constructs and test a structural model. My target population is women SHG members across Thrissur district.",
-            label_visibility="collapsed", key="meth_input")
+        meth_src_a, meth_src_b = st.tabs(["✏️ Paste Description", "📎 Upload File"])
+        meth_input = ""
+        with meth_src_a:
+            meth_input = st.text_area("Research description", height=170,
+                placeholder="Describe your research. Example:\n\nI am studying the impact of financial literacy and digital banking adoption on the investment behaviour of women micro-entrepreneurs in Kerala. I want to understand causal relationships between constructs and test a structural model. My target population is women SHG members across Thrissur district.",
+                label_visibility="collapsed", key="meth_input_paste")
+        with meth_src_b:
+            meth_file = st.file_uploader(
+                "Upload research proposal / synopsis",
+                type=["txt","pdf","docx","doc"],
+                label_visibility="collapsed", key="meth_upload",
+                help="Upload a research proposal, synopsis, or concept note (PDF, Word, TXT)"
+            )
+            if meth_file:
+                file_ext_m = meth_file.name.split(".")[-1].lower()
+                if file_ext_m == "txt":
+                    meth_input = meth_file.read().decode("utf-8", errors="ignore")
+                elif file_ext_m == "pdf" and PDF_OK:
+                    import io as _io
+                    with pdfplumber.open(_io.BytesIO(meth_file.read())) as _pdf:
+                        meth_input = "\n".join(p.extract_text() or "" for p in _pdf.pages[:15])
+                elif file_ext_m in ("docx","doc"):
+                    try:
+                        import docx as _docx
+                        import io as _io
+                        doc = _docx.Document(_io.BytesIO(meth_file.read()))
+                        meth_input = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+                    except ImportError:
+                        meth_input = meth_file.read().decode("utf-8", errors="ignore")
+                if meth_input.strip():
+                    st.success(f"✅ Loaded: {meth_file.name} ({len(meth_input.split()):,} words)")
+                    with st.expander("Preview"):
+                        st.text(meth_input[:500] + ("…" if len(meth_input) > 500 else ""))
+
+        meth_final = (st.session_state.get("meth_input_paste","") or meth_input).strip()
+
         meth_btn = st.button("🧪 Recommend Methodology", type="primary",
-                             disabled=(not meth_input.strip() or not groq_key), key="meth_btn")
+                             disabled=(not meth_final or not groq_key), key="meth_btn")
 
         meth_res = st.session_state.method_result
-        if meth_btn and meth_input.strip() and groq_key:
+        if meth_btn and meth_final and groq_key:
             with st.spinner("Analysing research design…"):
                 try:
-                    meth_res = recommend_methodology(groq_key, model_choice, meth_input)
+                    meth_res = recommend_methodology(groq_key, model_choice, meth_final)
                     st.session_state.method_result = meth_res
                     st.rerun()
                 except Exception as e: st.error(f"❌ {e}")
@@ -2103,14 +2170,14 @@ LIMITATIONS:
 
             mc1, mc2, mc3 = st.columns(3)
             with mc1:
-                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.82rem;">📊 Analysis techniques</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color:#ffffff;font-weight:700;font-size:0.82rem;">📊 Analysis techniques</p>', unsafe_allow_html=True)
                 for tech in meth_res.get("analysis_techniques",[]):
                     st.markdown(f'<div style="background:#f0f7f0;border-radius:6px;padding:0.35rem 0.7rem;margin-bottom:0.3rem;font-size:0.82rem;color:#1a2e1b;">✓ {_html.escape(tech)}</div>', unsafe_allow_html=True)
             with mc2:
-                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.82rem;">🔢 Sample & sampling</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color:#ffffff;font-weight:700;font-size:0.82rem;">🔢 Sample & sampling</p>', unsafe_allow_html=True)
                 st.markdown(f'<div style="background:#f0f7f0;border-radius:8px;padding:0.7rem;font-size:0.82rem;color:#1a2e1b;line-height:1.6;"><b>Size:</b> {_html.escape(str(meth_res.get("sample_size","")))}<br><b>Strategy:</b> {_html.escape(meth_res.get("sampling_strategy",""))}<br><b>Software:</b> {_html.escape(meth_res.get("software",""))}</div>', unsafe_allow_html=True)
             with mc3:
-                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.82rem;">📥 Data collection</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color:#ffffff;font-weight:700;font-size:0.82rem;">📥 Data collection</p>', unsafe_allow_html=True)
                 for dc in meth_res.get("data_collection",[]):
                     st.markdown(f'<div style="background:#f0f7f0;border-radius:6px;padding:0.35rem 0.7rem;margin-bottom:0.3rem;font-size:0.82rem;color:#1a2e1b;">• {_html.escape(dc)}</div>', unsafe_allow_html=True)
 
@@ -2149,7 +2216,7 @@ CONCEPTUAL FRAMEWORK HINT:
     # ── S3: HYPOTHESIS GENERATOR ─────────────────────────────────────────────
     with s3:
         st.markdown('<div class="card-title">🔬 Hypothesis Generator</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Enter your research topic and key variables — get testable H0/H1 hypotheses with theoretical justification and variable classification.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Enter your research topic and key variables — get testable H0/H1 hypotheses with theoretical justification and variable classification.</p>', unsafe_allow_html=True)
 
         hc1, hc2 = st.columns([3, 2])
         with hc1:
@@ -2174,7 +2241,7 @@ CONCEPTUAL FRAMEWORK HINT:
                 except Exception as e: st.error(f"❌ {e}")
 
         if hyp_res and "error" not in hyp_res:
-            st.markdown(f'<p style="color:#1e5c22;font-weight:700;margin-top:0.8rem;">Research question: {_html.escape(hyp_res.get("research_question",""))}</p>', unsafe_allow_html=True)
+            st.markdown(f'<p style="color:#ffffff;font-weight:700;margin-top:0.8rem;">Research question: {_html.escape(hyp_res.get("research_question",""))}</p>', unsafe_allow_html=True)
 
             # Variable classification
             vc = hyp_res.get("variable_classification", {})
@@ -2190,7 +2257,7 @@ CONCEPTUAL FRAMEWORK HINT:
             h0s = hyp_res.get("null_hypotheses", [])
             h1s = hyp_res.get("alternate_hypotheses", [])
             rationale = hyp_res.get("directional_rationale", [])
-            st.markdown('<p style="color:#1e5c22;font-weight:700;margin-top:1rem;">Hypotheses</p>', unsafe_allow_html=True)
+            st.markdown('<p style="color:#ffffff;font-weight:700;margin-top:1rem;">Hypotheses</p>', unsafe_allow_html=True)
 
             hyp_text_parts = [f"RESEARCH QUESTION:\n{hyp_res.get('research_question','')}\n"]
             for i, (h0, h1) in enumerate(zip(h0s, h1s), 1):
@@ -2219,7 +2286,7 @@ CONCEPTUAL FRAMEWORK HINT:
     # ── S4: VARIABLE OPERATIONALISER ─────────────────────────────────────────
     with s4:
         st.markdown('<div class="card-title">📏 Variable Operationaliser & Scale Developer</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Enter a research variable and context — get a construct definition, validated scale items, reliability guidance, and measurement source.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Enter a research variable and context — get a construct definition, validated scale items, reliability guidance, and measurement source.</p>', unsafe_allow_html=True)
 
         vc1, vc2 = st.columns([1, 2])
         with vc1:
@@ -2247,7 +2314,7 @@ CONCEPTUAL FRAMEWORK HINT:
                   <div style="font-size:0.78rem;color:#3d5e40;margin-top:0.5rem;"><b>Source:</b> {_html.escape(var_res.get("scale_source",""))} &nbsp;|&nbsp; <b>Response:</b> {_html.escape(var_res.get("response_format",""))}</div>
                 </div>""", unsafe_allow_html=True)
 
-                st.markdown('<p style="color:#1e5c22;font-weight:700;font-size:0.85rem;">Survey items (Likert scale)</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color:#ffffff;font-weight:700;font-size:0.85rem;">Survey items (Likert scale)</p>', unsafe_allow_html=True)
                 items     = var_res.get("measurement_items", [])
                 rev_coded = var_res.get("reverse_coded_items", [])
                 var_text_parts = [f"VARIABLE: {var_res.get('variable','')}\n",
@@ -2294,7 +2361,7 @@ with tab6:
     # ── P1: JOURNAL MATCHER ──────────────────────────────────────────────────
     with p1:
         st.markdown('<div class="card-title">🎯 Journal Matcher — Scopus / ABDC / UGC CARE</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Paste your abstract and keywords to get ranked journal recommendations with indexing, impact factors, acceptance rates, and submission strategy.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Paste your abstract and keywords to get ranked journal recommendations with indexing, impact factors, acceptance rates, and submission strategy.</p>', unsafe_allow_html=True)
 
         jc1, jc2 = st.columns([2, 1])
         with jc1:
@@ -2319,7 +2386,7 @@ with tab6:
                 except Exception as e: st.error(f"❌ {e}")
 
         if jm_res and "error" not in jm_res:
-            st.markdown(f'<p style="color:#1e5c22;font-weight:700;margin-top:0.8rem;">Domain detected: {_html.escape(jm_res.get("research_domain",""))}</p>', unsafe_allow_html=True)
+            st.markdown(f'<p style="color:#ffffff;font-weight:700;margin-top:0.8rem;">Domain detected: {_html.escape(jm_res.get("research_domain",""))}</p>', unsafe_allow_html=True)
 
             INDEX_COLORS = {
                 "Scopus":   ("#e6f1fb","#0c447c"),
@@ -2407,7 +2474,7 @@ with tab6:
     # ── P3: REVIEWER RESPONSE DRAFTER ────────────────────────────────────────
     with p3:
         st.markdown('<div class="card-title">🔁 Reviewer Response Letter Drafter</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Paste the reviewer comments you received. Get a structured, professional point-by-point response letter ready to submit.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Paste the reviewer comments you received. Get a structured, professional point-by-point response letter ready to submit.</p>', unsafe_allow_html=True)
 
         rc1, rc2 = st.columns([1, 1])
         with rc1:
@@ -2467,7 +2534,7 @@ with tab6:
     # ── P4: CONTRIBUTION STATEMENT ───────────────────────────────────────────
     with p4:
         st.markdown('<div class="card-title">💡 Research Contribution Statement Generator</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:#3d5e40;font-size:0.88rem;">Generate a publication-ready Research Contribution paragraph for thesis chapters, journal submissions, and conference papers.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Generate a publication-ready Research Contribution paragraph for thesis chapters, journal submissions, and conference papers.</p>', unsafe_allow_html=True)
 
         csc1, csc2 = st.columns([1, 1])
         with csc1:
