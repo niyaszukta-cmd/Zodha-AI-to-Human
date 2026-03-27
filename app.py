@@ -431,38 +431,180 @@ def _build_prompt(style, intensity, chunk):
     few_shot   = _FEW_SHOT.get(style, "")
     anti_ai    = _AI_PATTERNS_TO_AVOID
 
+    # ── Detect input format ─────────────────────────────────────────
+    fmt = detect_format(chunk)
+    fmt_type = fmt['format_type']
+
+    # Build format-preservation instruction
+    if fmt_type == 'bullets':
+        bullet_char = list(fmt['bullet_chars'])[0] if fmt['bullet_chars'] else '•'
+        fmt_rule = (
+            f"FORMAT PRESERVATION (MANDATORY):\n"
+            f"The input text is a BULLETED LIST. Your output MUST:\n"
+            f"  • Keep exactly the same number of bullet points as the input.\n"
+            f"  • Start each bullet with '{bullet_char}' (same bullet character as input).\n"
+            f"  • Rewrite each bullet point in human, natural language — vary sentence length, "
+            f"avoid AI patterns — but keep the bullet structure intact.\n"
+            f"  • Preserve any introductory sentence or heading before the list.\n"
+            f"  • Do NOT merge bullet points or convert them to prose paragraphs.\n"
+            f"  • RULE 4 on sentence variation applies WITHIN each bullet point where length allows.\n"
+        )
+    elif fmt_type == 'numbered':
+        fmt_rule = (
+            f"FORMAT PRESERVATION (MANDATORY):\n"
+            f"The input text is a NUMBERED LIST. Your output MUST:\n"
+            f"  • Keep exactly the same number of items, in the same order.\n"
+            f"  • Preserve the numbering format (1. / 1) / (1) — match what the input uses).\n"
+            f"  • Rewrite each numbered item in natural, varied language.\n"
+            f"  • Preserve any introductory sentence or heading before the list.\n"
+            f"  • Do NOT merge items or convert them to prose.\n"
+        )
+    elif fmt_type == 'mixed':
+        fmt_rule = (
+            f"FORMAT PRESERVATION (MANDATORY):\n"
+            f"The input has MIXED formatting (headings + lists). Your output MUST:\n"
+            f"  • Preserve all headings in place.\n"
+            f"  • Keep all bullet/numbered lists as lists — do not convert to prose.\n"
+            f"  • Rewrite content within each section naturally.\n"
+            f"  • Maintain the same overall document structure.\n"
+        )
+    elif fmt_type == 'headings':
+        fmt_rule = (
+            f"FORMAT PRESERVATION (MANDATORY):\n"
+            f"The input contains SECTION HEADINGS. Your output MUST:\n"
+            f"  • Keep all headings exactly as they appear (do not rewrite headings).\n"
+            f"  • Rewrite only the body text under each heading.\n"
+            f"  • Do not add or remove sections.\n"
+        )
+    else:
+        # Pure prose — standard no-list rule
+        fmt_rule = (
+            "FORMAT RULE: The input is prose. Do NOT introduce bullet points, "
+            "numbered lists, or headers that were not in the original.\n"
+        )
+
     user = (
         "TASK: Rewrite the text below to maximise humanness score.\n\n"
         f"INTENSITY LEVEL:\n{note}\n\n"
         f"REGISTER REQUIREMENTS:\n{reg}\n\n"
         f"{anti_ai}\n\n"
         f"{few_shot}\n\n"
+        f"{fmt_rule}\n"
         "ABSOLUTE OUTPUT RULES:\n"
         "1. Output ONLY the rewritten text — zero preamble, zero commentary, zero explanation.\n"
         "2. Preserve 100% of original meaning, all numerical data, all citations, all technical terms.\n"
-        "3. No bullet points or numbered lists unless the original text contained them.\n"
+        "3. Preserve the EXACT formatting structure of the input (bullets stay bullets, "
+        "numbered lists stay numbered, headings stay headings, prose stays prose).\n"
         "4. SENTENCE LENGTH VARIATION IS NON-NEGOTIABLE: your output MUST contain both very short "
         "sentences (4-8 words) AND long complex sentences (32-45 words). "
         "If every sentence is 15-25 words, you have failed.\n"
         "5. No two consecutive sentences may begin with the same word.\n"
         "6. Do NOT invent new facts, statistics, or examples not present in the original.\n"
-        "7. SELF-CHECK before outputting: scan your rewrite for AI patterns listed above and fix any you find.\n\n"
+        "7. SELF-CHECK before outputting: scan your rewrite for AI patterns listed above "
+        "and fix any you find. Also verify the output format matches the input format.\n\n"
         f"TEXT TO REWRITE:\n\"\"\"\n{chunk}\n\"\"\"\n"
     )
     return system, user
 
+def detect_format(text: str) -> dict:
+    """
+    Detect structural formatting in the input text.
+    Returns a dict describing what formatting was found.
+    """
+    lines = text.split('\n')
+    info = {
+        'has_bullets':  False,
+        'has_numbered': False,
+        'has_headings': False,
+        'bullet_chars': set(),
+        'format_type':  'prose',  # 'prose' | 'bullets' | 'numbered' | 'mixed' | 'headings'
+    }
+    bullet_count   = 0
+    numbered_count = 0
+    heading_count  = 0
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        # Bullet: lines starting with •, -, *, –, —, ▪, ○, ✓, ✗, ·
+        if re.match(r'^[•\-\*–—▪○✓✗·]\s+', s):
+            bullet_count += 1
+            info['bullet_chars'].add(s[0])
+        # Numbered: 1. or 1) or (1) formats
+        elif re.match(r'^\(?\d+[.)\]]?\s+', s):
+            numbered_count += 1
+        # Heading: ALL CAPS line, or markdown ## heading, or ends with :
+        elif re.match(r'^#{1,4}\s', s) or (s.isupper() and len(s) > 4 and len(s) < 80):
+            heading_count += 1
+
+    info['has_bullets']  = bullet_count  >= 2
+    info['has_numbered'] = numbered_count >= 2
+    info['has_headings'] = heading_count  >= 1
+
+    if bullet_count + numbered_count >= 3:
+        info['format_type'] = 'bullets' if bullet_count >= numbered_count else 'numbered'
+    elif bullet_count + numbered_count >= 1 and heading_count >= 1:
+        info['format_type'] = 'mixed'
+    elif heading_count >= 1:
+        info['format_type'] = 'headings'
+
+    return info
+
+
 def chunk_text(text, max_words=450):
-    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
-    chunks, current, current_wc = [], [], 0
-    for para in paragraphs:
-        wc = len(para.split())
-        if current_wc + wc > max_words and current:
+    """
+    Split text into chunks for processing.
+    Crucially: keeps bullet lists and numbered lists together —
+    never splits in the middle of a list block.
+    """
+    # Normalise line endings
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    # Detect if this is list-formatted text
+    fmt = detect_format(text)
+
+    if fmt['format_type'] in ('bullets', 'numbered', 'mixed'):
+        # List mode: group by logical blocks separated by blank lines,
+        # but never break mid-list — keep complete list blocks together
+        blocks = []
+        current_block = []
+        for line in text.split('\n'):
+            if line.strip() == '':
+                if current_block:
+                    blocks.append('\n'.join(current_block))
+                    current_block = []
+            else:
+                current_block.append(line)
+        if current_block:
+            blocks.append('\n'.join(current_block))
+
+        # Now group blocks into chunks under max_words
+        chunks, current, current_wc = [], [], 0
+        for block in blocks:
+            wc = len(block.split())
+            if current_wc + wc > max_words and current:
+                chunks.append('\n\n'.join(current))
+                current, current_wc = [block], wc
+            else:
+                current.append(block); current_wc += wc
+        if current:
             chunks.append('\n\n'.join(current))
-            current, current_wc = [para], wc
-        else:
-            current.append(para); current_wc += wc
-    if current: chunks.append('\n\n'.join(current))
-    return chunks if chunks else [text]
+        return chunks if chunks else [text]
+
+    else:
+        # Prose mode: original paragraph-splitting logic
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        chunks, current, current_wc = [], [], 0
+        for para in paragraphs:
+            wc = len(para.split())
+            if current_wc + wc > max_words and current:
+                chunks.append('\n\n'.join(current))
+                current, current_wc = [para], wc
+            else:
+                current.append(para); current_wc += wc
+        if current:
+            chunks.append('\n\n'.join(current))
+        return chunks if chunks else [text]
 
 def call_groq(api_key, model, system_prompt, user_prompt, max_tokens=2048, stream=False):
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -493,19 +635,48 @@ def humanize_streaming(api_key, model, chunk, style, intensity, placeholder):
     system, user = _build_prompt(style, intensity, chunk)
     full_text = ""
     import html as _html
+
+    def render_output(text, cursor=False):
+        """
+        Render output preserving bullet/numbered list formatting.
+        Uses Streamlit markdown for lists, html.escape for prose.
+        """
+        fmt = detect_format(text)
+        if fmt['format_type'] in ('bullets', 'numbered', 'mixed', 'headings'):
+            # Use native Streamlit markdown — it renders •, -, 1. etc. correctly
+            cursor_str = "▌" if cursor else ""
+            placeholder.markdown(text + cursor_str)
+        else:
+            safe = _html.escape(text)
+            cur  = "▌" if cursor else ""
+            placeholder.markdown(
+                f'<div class="output-box" style="min-height:100px;">{safe}{cur}</div>',
+                unsafe_allow_html=True)
+
     for token in stream_groq(api_key, model, system, user):
         full_text += token
-        safe = _html.escape(full_text)
-        placeholder.markdown(
-            f'<div class="output-box" style="min-height:100px;">{safe}▌</div>',
-            unsafe_allow_html=True)
-    safe = _html.escape(full_text)
-    placeholder.markdown(f'<div class="output-box">{safe}</div>', unsafe_allow_html=True)
+        render_output(full_text, cursor=True)
+
+    render_output(full_text, cursor=False)
     return full_text
 
 def paraphrase_text(api_key, model, text, mode):
+    fmt = detect_format(text)
+    fmt_type = fmt['format_type']
+    fmt_note = ""
+    if fmt_type in ('bullets','numbered','mixed'):
+        fmt_note = (
+            "\n\nFORMAT PRESERVATION: The input is a list. "
+            "Keep ALL bullet points or numbered items in the output. "
+            "Do NOT convert to prose. Rewrite each item naturally but preserve the list structure exactly."
+        )
+    elif fmt_type == 'headings':
+        fmt_note = (
+            "\n\nFORMAT PRESERVATION: The input has headings. "
+            "Keep all headings intact. Only rewrite the body text under each heading."
+        )
     resp = call_groq(api_key, model, PARAPHRASE_MODES[mode],
-                     f"TEXT TO PARAPHRASE:\n\"\"\"\n{text}\n\"\"\"", stream=False)
+                     f"TEXT TO PARAPHRASE:\n\"\"\"\n{text}\n\"\"\"{fmt_note}", stream=False)
     return resp.json()["choices"][0]["message"]["content"].strip()
 
 def grammar_check(api_key, model, text):
