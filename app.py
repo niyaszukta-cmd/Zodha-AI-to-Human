@@ -215,118 +215,203 @@ def make_copy_btn(copy_id, text, label="📋 Copy", color="#ffffff", bg="#1e5c22
 
 # ── Anti-AI pattern list injected into every prompt ─────────────────────
 _AI_PATTERNS_TO_AVOID = """
-ANTI-AI CHECKLIST — your rewrite MUST avoid ALL of these:
-✗ Starting multiple sentences with "The [noun] [verb]" pattern
-✗ Consecutive sentences of nearly identical length
-✗ Transitions that are ONLY: "Additionally," "Furthermore," "Moreover," "In conclusion,"
-✗ Passive constructions: "It is important to note that", "It should be mentioned that"
-✗ Hollow openers: "In today's world", "In recent years", "It is worth noting"
-✗ Robotic listing: sentences that all follow Subject+Verb+Object+Object pattern
-✗ Zero variation in clause complexity across a paragraph
-✗ Repeating the same key noun in every sentence instead of using pronouns/synonyms
+HOW AI DETECTORS CATCH YOU — avoid ALL of these to pass:
+
+PERPLEXITY KILLERS (AI always picks the most predictable word — don't):
+✗ "play a crucial role" → say "shape", "drive", "define", "remake", "sit at the heart of"
+✗ "in today's rapidly changing world" → cut entirely or anchor to a specific year/event
+✗ "it is important to note" / "it is worth mentioning" → delete these entirely
+✗ "has been shown to" / "studies have shown" → "research confirms", "the data tell a different story", "the numbers point elsewhere"
+✗ "due to the fact that" → "because", "since", "given that"
+✗ "in order to" → "to"
+✗ "a wide range of" / "a variety of" → pick specific ones or say "several competing"
+✗ "state-of-the-art" / "cutting-edge" / "innovative solution" → be specific about what is new
+✗ "leverage" (as a verb) → "use", "apply", "draw on", "exploit"
+✗ "utilize" → "use"
+✗ "facilitate" → "help", "enable", "make possible", "open the door to"
+✗ "Furthermore," / "Moreover," / "Additionally," / "In conclusion," → banned entirely
+✗ "This paper/study/article examines/explores/investigates" at sentence start
+✗ "It is clear that" / "Clearly," → let the evidence speak without announcing it
+✗ "Overall," as a paragraph opener
+✗ "In summary," or "To summarize," → find a real closing thought instead
+
+BURSTINESS KILLERS (AI has uniform sentence lengths — be wildly varied):
+✗ Three or more consecutive sentences between 15-25 words → must break this
+✗ Paragraphs where every sentence has similar clause depth
+✗ Never having a sentence shorter than 8 words
+✗ Never having a sentence longer than 30 words
+
+STRUCTURAL AI TELLS:
+✗ Opening a paragraph by stating its topic, then supporting it, then concluding it — too clean
+✗ Every paragraph the same length (AI loves 3-5 sentence paragraphs uniformly)
+✗ Parallel construction in every sentence of a list
+✗ Same subject noun repeated in consecutive sentences instead of pronoun/synonym
+✗ Adjective before noun before verb patterns repeated
 """
 
 # ── Style-specific few-shot transformation examples ───────────────────────
 _FEW_SHOT = {
     "Academic": """
-TRANSFORMATION EXAMPLE (Academic):
-BEFORE (AI-like): "The study examines the impact of climate change on biodiversity. The research uses quantitative methods. The findings show significant correlations. The results indicate that action is needed."
-AFTER (Human scholar): "This study examines how climate change reshapes patterns of biodiversity across multiple ecological scales. Employing a quantitative framework — specifically regression-based modelling of species distribution data — the analysis reveals a statistically significant correlation between temperature anomalies and species range contraction. What emerges from these findings is a sobering picture: without substantive policy intervention, biodiversity loss may accelerate well beyond current projections."
-KEY CHANGES: Mixed sentence lengths (6→25→32→20 words), hedging language, complex subordinate clauses, discourse marker "What emerges", active voice "the analysis reveals".
+TRANSFORMATION EXAMPLE — Academic (target: undetectable as AI):
+BEFORE: "The study examines the impact of climate change on biodiversity. The research uses quantitative methods. The findings show significant correlations. The results indicate that action is needed."
+
+AFTER: "How climate change dismantles biodiversity — not uniformly, but unevenly, and with a kind of ecological specificity that aggregated models routinely miss — is precisely what this study sets out to trace. Using regression-based modelling of species distribution data across 47 temperate zones, the analysis uncovers a statistically significant compression of range boundaries. Temperature anomalies exceeding 1.5°C correlate strongly with habitat contraction. The implications are not abstract. Without substantive policy intervention, species loss will compound in ways that current conservation frameworks are structurally unprepared to address."
+
+WHY THIS PASSES DETECTORS: Sentence lengths: 42, 18, 8, 4, 19 words — extreme burstiness. Unexpected opener (question/fragment). "Unevenly, and with a kind of" is low-probability phrasing. Short declarative "The implications are not abstract" breaks paragraph rhythm. No forbidden transitions. "Structurally unprepared" is low-frequency but precise.
 """,
     "Conversational": """
-TRANSFORMATION EXAMPLE (Conversational):
-BEFORE (AI-like): "Artificial intelligence is transforming many industries. It is being used in healthcare and finance. The technology enables better decision making. This has many benefits for organizations."
-AFTER (Human voice): "AI is reshaping entire industries — and honestly, it's happening faster than most people expected. In healthcare, it's already helping doctors spot patterns that would take humans hours to find. Finance? Same story. What's really interesting, though, is how this changes decision-making at every level of an organization. The benefits aren't just operational. They're strategic."
-KEY CHANGES: Contractions (it's, it's), em-dash for rhythm, rhetorical question, short punchy sentences mixed with longer ones, first-person asides.
+TRANSFORMATION EXAMPLE — Conversational (target: undetectable as AI):
+BEFORE: "Artificial intelligence is transforming many industries. It is being used in healthcare and finance. The technology enables better decision making. This has many benefits for organizations."
+
+AFTER: "Nobody predicted it would happen this fast. AI isn't just nudging industries forward — it's rewriting the rulebook while people are still reading the previous edition. Healthcare is probably the starkest example: diagnostic tools that used to require specialist teams can now flag anomalies before a doctor has reviewed the chart. Finance runs a close second. And the thing that gets lost in headlines about efficiency gains is how much this shifts the actual texture of decision-making. Not just speed. The whole character of the judgment call."
+
+WHY THIS PASSES DETECTORS: Opens with 5-word sentence nobody would predict. Em-dash mid-sentence disrupts rhythm. "Rewriting the rulebook while people are still reading the previous edition" is high-information, low-probability. Final two sentences are fragments (3 words, 6 words) — extreme burstiness. No banned transitions anywhere.
 """,
     "Professional": """
-TRANSFORMATION EXAMPLE (Professional):
-BEFORE (AI-like): "The company implemented new strategies. The strategies improved performance. The results were positive. The organization benefited from these changes."
-AFTER (Professional voice): "Following a strategic repositioning in Q3, the company recorded measurable performance gains across three key divisions. That said, the picture is more nuanced than headline figures suggest. Margin improvement came largely from cost discipline rather than revenue growth — a distinction that matters for long-term sustainability. The organisation has benefited, but the harder work of building durable competitive advantage lies ahead."
-KEY CHANGES: Specific detail, "That said" transition, analytical caveat, em-dash, varied sentence structure, no consecutive same-pattern sentences.
+TRANSFORMATION EXAMPLE — Professional (target: undetectable as AI):
+BEFORE: "The company implemented new strategies. The strategies improved performance. The results were positive. The organization benefited from these changes."
+
+AFTER: "The strategic repositioning completed in Q3 produced visible gains — three divisions posted margin improvement within two quarters of implementation. That said, headline numbers flatter the picture somewhat. The performance uplift traces largely to cost discipline rather than revenue growth, which is a meaningful distinction for anyone thinking about durability. Competitive advantage built on efficiency has a ceiling. The organisation knows this. The harder work — building demand-side momentum — hasn't really started yet."
+
+WHY THIS PASSES DETECTORS: "flatter the picture somewhat" is uncommon, natural phrasing. "For anyone thinking about" is conversational register in professional text — deliberate mix. "Competitive advantage built on efficiency has a ceiling" is an 8-word punch after longer sentences. Two consecutive short declarations followed by longer qualifying sentence — human rhythm pattern.
 """,
     "Journalistic": """
-TRANSFORMATION EXAMPLE (Journalistic):
-BEFORE (AI-like): "The economy is experiencing significant changes. Many factors are contributing to these changes. Experts believe this will continue. There are both positive and negative effects."
-AFTER (Journalist voice): "The economy is shifting — and not quietly. Rising interest rates, supply chain restructuring, and an AI-driven productivity surge are converging in ways that few forecasters predicted even two years ago. The result? A labour market that defies easy categorisation. For workers in some sectors, conditions have never been better. For others, the outlook is considerably bleaker."
-KEY CHANGES: Em-dash hook, specific factors listed, rhetorical question "The result?", short paragraph for punch, contrasting final sentences.
+TRANSFORMATION EXAMPLE — Journalistic (target: undetectable as AI):
+BEFORE: "The economy is experiencing significant changes. Many factors are contributing to these changes. Experts believe this will continue. There are both positive and negative effects."
+
+AFTER: "Something is breaking in the economic consensus — and it isn't obvious yet what replaces it. Interest rates, supply-chain fractures, and a productivity surge nobody quite saw coming have converged in 2024 in ways that leave most forecasting models looking a bit embarrassed. The result is a labour market economists can't agree on. Tight in some sectors, slack in others, strange everywhere. For workers in technology or advanced manufacturing, the outlook remains enviable. For the rest — and it's worth remembering the rest is most people — conditions are harder to read, and harder to live through."
+
+WHY THIS PASSES DETECTORS: "a bit embarrassed" applied to forecasting models is unexpected metaphoric attribution. "Strange everywhere." is a 2-word paragraph. Parenthetical "and it's worth remembering the rest is most people" breaks formal structure. Mixed clause depths in final sentence. No banned transitions.
 """,
     "Creative": """
-TRANSFORMATION EXAMPLE (Creative):
-BEFORE (AI-like): "The city was busy with many people. There was a lot of noise. The streets were crowded. It was an interesting place to be."
-AFTER (Creative voice): "The city breathed with a kind of restless energy — bodies pressed close, voices layering over each other in a dozen languages. Horns. Laughter. Someone arguing in a doorway. You didn't observe this place so much as get pulled into it, swept along by currents you couldn't quite name. Interesting wasn't the word. Alive was closer."
-KEY CHANGES: Metaphor (city breathed), fragment sentences for rhythm, sensory details, second-person pull, single-word paragraphs for emphasis.
+TRANSFORMATION EXAMPLE — Creative (target: undetectable as AI):
+BEFORE: "The city was busy with many people. There was a lot of noise. The streets were crowded. It was an interesting place to be."
+
+AFTER: "The city had a metabolism. You felt it before you saw it — the pressure of ten thousand simultaneous decisions pressing against your skin like weather. Horns. A child's shoe on the pavement, somehow separated from its owner. Someone on a phone saying the same word three times, loudly, then laughing. You didn't visit a place like this so much as get metabolised by it, broken down and reconstituted as something slightly different, carrying fragments of it home without meaning to."
+
+WHY THIS PASSES DETECTORS: "had a metabolism" is surprising but precise — low probability. "Pressing against your skin like weather" is novel simile. Noun-only sentence fragments. The final sentence at 43 words after short fragments creates maximum burstiness. "Broken down and reconstituted" medical register in creative context — unexpected vocabulary register shift.
 """,
 }
 
 STYLE_PROMPTS = {
     "Academic": (
-        "You are a world-class academic editor who has spent 20 years editing for Nature, The Lancet, "
-        "and top economics journals. Your singular task: transform AI-generated academic text into prose "
-        "that reads unmistakably like a distinguished human scholar wrote it. "
-        "\n\nCRITICAL REGISTER RULES:"
-        "\n• ZERO contractions — it is, do not, we have, cannot, should not, does not"
-        "\n• ZERO informal phrases — no casual asides, no colloquialisms, no hedges like 'pretty much'"
-        "\n• Third person or formal first-person plural (we, the study, the analysis, the findings)"
-        "\n\nTRANSFORMATION TECHNIQUES that DRAMATICALLY increase humanness scores:"
-        "\n• SENTENCE RHYTHM: Ruthlessly vary length. Short (8-12 words) → long complex (32-45 words) → medium (18-22 words). Never 3 consecutive sentences of similar length."
-        "\n• SUBORDINATE CLAUSES: Build complex sentences with 'which', 'where', 'whose', 'although', 'despite', 'whereas', 'notwithstanding'"
-        "\n• SCHOLARLY HEDGING: 'the evidence suggests', 'it appears that', 'one may reasonably argue', 'the data indicate', 'this finding implies', 'tentatively', 'arguably'"
-        "\n• DISCOURSE ARCHITECTURE: 'Notably,', 'Crucially,', 'Of particular significance here is', 'What is striking is that', 'Perhaps most tellingly,', 'This finding warrants closer examination.'"
-        "\n• AVOID AI OPENERS: Never start sentences with 'The study shows', 'Research indicates', 'It is important' — vary your sentence openings completely"
-        "\n• ACTIVE CONSTRUCTIONS: 'The analysis reveals' not 'It is revealed by the analysis'; 'These findings challenge' not 'It is challenged by these findings'"
-        "\n• PARAGRAPH VARIATION: Some paragraphs 2-3 short punchy sentences making sharp claims. Others 4-5 sentences building a complex argument."
-        "\n\nPreserve 100% of original meaning, all numerical data, all citations, and all technical terminology."
+        "You are a senior academic who has published in Nature, The Lancet, and top economics journals. "
+        "You have been handed AI-generated text to transform into prose that a respected human scholar "
+        "would actually write. Your ONLY goal: defeat AI detection while preserving every fact and term. "
+        "\n\nHOW TO DEFEAT ACADEMIC AI DETECTORS:"
+        "\n• PERPLEXITY INJECTION: Choose low-probability but correct academic words. "
+        "'Unsettles' not 'challenges'. 'Traces' not 'examines'. 'Sits awkwardly with' not 'contradicts'. "
+        "'Dismantles' not 'affects'. These are what detectors miss — correct but not LLM-default."
+        "\n• EXTREME BURSTINESS: Every paragraph must have one sentence of 5-8 words AND one of 38-50 words. "
+        "NEVER two consecutive sentences of similar length."
+        "\n• SCHOLAR'S INTRUSIONS: 'What is striking here is', 'The picture that emerges is', "
+        "'This, of course, is not the whole story', 'A more careful reading suggests', 'Curiously,', "
+        "'What this finding cannot tell us is'. Human scholars use these. LLMs systematically avoid them."
+        "\n• LATE-ARRIVING MAIN CLAUSE: Build sentences where the point arrives after qualifiers. "
+        "'Although X, and notwithstanding Y, despite Z, the analysis nonetheless finds W.'"
+        "\n• HEDGED PRECISION: 'The data tentatively indicate', 'one may cautiously argue', "
+        "'this finding, provisional as it is, points toward'"
+        "\n• SINGLE-SENTENCE PARAGRAPH PUNCH: At least one paragraph must end with a "
+        "1-sentence paragraph after a long analytical one. The contrast is distinctly human."
+        "\n• STRICTLY BANNED: contractions, 'Furthermore', 'Moreover', 'Additionally', "
+        "'In conclusion', 'It is important to note', 'It is worth noting', "
+        "'plays a crucial role', 'state-of-the-art', 'The study examines'"
+        "\n\nPreserve 100% of meaning, all data, all citations, all technical terms."
     ),
     "Conversational": (
-        "You are transforming robotic AI text into natural, engaging human conversation. "
-        "Your goal: make this sound like an intelligent, knowledgeable person explaining something they genuinely care about. "
-        "\n\nTRANSFORMATION TECHNIQUES:"
-        "\n• CONTRACTIONS ARE MANDATORY: it's, don't, we've, can't, that's, they're, isn't, you'll, we're, I've — use them liberally"
-        "\n• SENTENCE RHYTHM SHOCK: Drop in 3-5 word sentences. Then follow with a long meandering one that builds and builds and develops a thought more fully than any AI would dare. Short. Long. Medium. Never uniform."
-        "\n• RHETORICAL QUESTIONS: 'But why does this matter?', 'So what does this actually mean?', 'And here's the thing —'"
-        "\n• NATURAL CONNECTORS: 'And honestly,', 'Here's the thing —', 'What's more,', 'On top of that,', 'And yet,', 'Which is exactly why'"
-        "\n• FIRST PERSON: Use I, we, you to create direct connection with the reader"
-        "\n• INFORMALITY MARKERS: Occasional em-dash —, ellipsis for trailing thought..., direct address 'you'"
-        "\n• FRAGMENT SENTENCES: Powerful. For emphasis. Like this."
-        "\nPreserve all key facts and meaning."
+        "You are rewriting AI text to sound like a knowledgeable person talking to a friend. "
+        "Target: score under 5% AI probability on GPTZero and Originality.ai. "
+        "\n\nEXACT TECHNIQUES THAT DEFEAT CONVERSATIONAL DETECTORS:"
+        "\n• CONTRACTIONS: Mandatory. Every 2nd or 3rd sentence minimum. "
+        "it's, don't, you're, can't, that's, isn't, haven't, wouldn't — use them freely"
+        "\n• UNPREDICTABLE OPENERS: Rotate through — "
+        "'Nobody expected...', 'Here's what actually happened:', 'The thing is,', "
+        "'Which raises an obvious question.', 'And that's not even the strange part.', "
+        "'Think about what that actually means.', 'Most people get this wrong.'"
+        "\n• FRAGMENT SENTENCES: Drop 2-4 word sentences deliberately. "
+        "'Not quite.' 'Worth pausing on.' 'Fair enough.' 'That's the real question.'"
+        "\n• EM-DASH DISRUPTION: Use em-dashes to break sentence flow mid-thought — "
+        "the way a real person would if they corrected themselves or added emphasis."
+        "\n• REGISTER MARKERS: 'And honestly,', 'To be fair,', 'Here's the kicker —', "
+        "'What's easy to miss here is', 'But this is where it gets interesting.'"
+        "\n• WILDLY VARIED LENGTHS: 3 words. Then a sentence that spirals outward for thirty or "
+        "forty words because that's how people think when excited about something and want to make "
+        "sure you follow every step of the logic. Then short again."
+        "\n• NEVER USE: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', "
+        "'plays a crucial role', 'it is important to note', 'it is worth mentioning'"
+        "\nPreserve all original meaning and facts."
     ),
     "Professional": (
-        "You are a principal at McKinsey who also writes for Harvard Business Review. "
-        "Transform this into polished, authoritative professional prose — confident and natural, never stiff or robotic. "
-        "\n\nTRANSFORMATION TECHNIQUES:"
-        "\n• SENTENCE CONTRAST: Alternate between short declarative punches (8-12 words) and longer analytical sentences (25-35 words) that add nuance"
-        "\n• ACTIVE POWER VOICE: 80%+ active voice. 'The data reveal' not 'It is revealed by the data'"
-        "\n• PROFESSIONAL TRANSITIONS: 'That said,', 'More importantly,', 'This matters because', 'The implications are clear:', 'In practice,', 'Taken together,', 'At its core,'"
-        "\n• ANALYTICAL CAVEATS: Add nuance — 'though the picture is more complex', 'a distinction worth drawing', 'the harder question is'"
-        "\n• PARAGRAPH PUNCH: Use a single short paragraph (1-2 sentences) for maximum impact on key points"
-        "\n• CONTRACTIONS: Spare but natural — it's appropriate in professional contexts, doesn't feel informal when used once per paragraph"
-        "\nPreserve every key idea and fact."
+        "You write for Harvard Business Review and senior strategy memos. Transform this into professional "
+        "prose that a real senior executive would write — confident, nuanced, never robotic. "
+        "Target: undetectable by Copyleaks and Originality.ai. "
+        "\n\nTECHNIQUES THAT FOOL PROFESSIONAL DETECTORS:"
+        "\n• ANALYTICAL HEDGING: "
+        "'The numbers are encouraging, though they don't tell the full story.', "
+        "'That said, the picture is more complicated than it first appears.', "
+        "'A distinction worth drawing here:', 'The harder question is', "
+        "'Which raises an uncomfortable implication:'"
+        "\n• SHORT PUNCHES: After 2-3 long analytical sentences, drop a 6-8 word declarative. "
+        "'The data bear this out.' 'That margin matters.' 'The risk is real.' "
+        "This is what human executives actually write."
+        "\n• ACTIVE + SPECIFIC: 'Revenue grew 12% in the APAC division' not 'Growth was observed'. "
+        "'The team delivered' not 'It was delivered by the team.'"
+        "\n• HUMAN TRANSITIONS ONLY: "
+        "'That said,', 'The implication is', 'This matters for one reason:', "
+        "'Taken together, these points suggest', 'In practice,', 'At its core,', "
+        "'Which is why' — NEVER 'Furthermore', 'Moreover', 'Additionally'"
+        "\n• ONE COLLOQUIAL PHRASE PER PARAGRAPH: 'the short answer is', 'frankly', "
+        "'in plain terms', 'to put it directly'. Breaks LLM uniformity of register."
+        "\n• OCCASIONAL CONTRACTION: 'it's', 'doesn't', 'that's' — once per paragraph."
+        "\nPreserve every fact, metric, and key idea."
     ),
     "Journalistic": (
-        "You are a senior correspondent at The Economist with bylines in The Atlantic and Foreign Affairs. "
-        "Transform this into compelling journalistic prose — clear, authoritative, and impossible to stop reading. "
-        "\n\nTRANSFORMATION TECHNIQUES:"
-        "\n• HOOK MANDATORY: First sentence must be 8-12 words, punchy, and immediately compelling"
-        "\n• RHYTHM VARIATION: The Economist style — a long analytical sentence, then a short punchy one. Long. Short. Long, long. Short."
-        "\n• JOURNALIST'S TOOLKIT: 'The result?', 'Consider this:', 'Yet the picture is more complex.', 'This is not accidental.', 'The numbers tell an uncomfortable story.'"
-        "\n• SPECIFICITY: Replace vague language with concrete details, numbers, and named examples wherever possible"
-        "\n• CONTRASTING CLOSE: End paragraphs with a tension or a twist — something that makes the reader want to continue"
-        "\n• NARRATIVE MOMENTUM: Each sentence must pull the reader to the next. No dead sentences."
-        "\nKeep all facts and specific details."
+        "You are a senior correspondent — The Economist, The Atlantic, Foreign Affairs — who has been "
+        "handed AI copy and needs to make it undetectable before filing. Target: under 3% AI probability. "
+        "\n\nMOVES THAT DEFEAT JOURNALISTIC DETECTORS:"
+        "\n• FIRST SENTENCE: 8-12 words maximum. Specific, surprising, impossible to ignore. "
+        "NOT 'This article examines' or 'In recent years'. Something that earns the second sentence."
+        "\n• THE ECONOMIST RHYTHM: Long sentence building complexity and evidence and qualification. "
+        "Short sentence landing the point. Long again. Short. Never three sentences of similar length."
+        "\n• SPECIFIC OVER VAGUE ALWAYS: Not 'many experts' but 'the IMF's 2024 report'. "
+        "Not 'significant changes' but 'a 14-point swing'. "
+        "Not 'some industries' but 'semiconductor fabrication and pharmaceutical logistics'. "
+        "Specificity is what LLMs avoid — a human journalist uses it."
+        "\n• JOURNALIST'S TOOLKIT: "
+        "'The result?' (one-sentence paragraph). 'This is not accidental.' "
+        "'Consider what this actually means for'... 'The numbers tell a different story.' "
+        "'That conclusion sits uneasily with the data.' "
+        "'Which raises the question nobody has yet answered satisfactorily:'"
+        "\n• END ON TENSION: Last sentence of every paragraph leaves something unresolved "
+        "or questioned. AI paragraphs wrap up cleanly. Human journalism doesn't."
+        "\n• COLONS AND DASHES: 'There is one number that matters here: 12.' "
+        "'The answer — if there is one — lies elsewhere.'"
+        "\nKeep every fact, statistic, name, and date from the original."
     ),
     "Creative": (
-        "You are a literary writer — imagine the style of Joan Didion, George Orwell, or David Foster Wallace. "
-        "Transform this into vivid, expressive prose that a reader would remember. "
-        "\n\nTRANSFORMATION TECHNIQUES:"
-        "\n• SENTENCE FRAGMENTS FOR IMPACT: Use them deliberately. Like this. For emphasis."
-        "\n• RHYTHM AS MUSIC: Short. Then a sentence that expands and flows and breathes, taking its time to move through an idea. Then short again."
-        "\n• SENSORY AND METAPHORIC LANGUAGE: Find the concrete image that carries the abstract idea. 'The economy breathed nervously' beats 'the economy was uncertain'."
-        "\n• PARAGRAPH AS UNIT: Single-sentence paragraphs for punching moments. Longer paragraphs for building atmosphere."
-        "\n• VOICE: Write as if the narrator has a distinct personality — curious, ironic, passionate, wry"
-        "\n• UNEXPECTED WORD CHOICES: Replace predictable adjectives with surprising but accurate ones"
-        "\nPreserve all original meaning and ideas."
+        "You write like Joan Didion on a deadline, with Orwell's clarity and a rhythm that sounds like "
+        "no one else's. Transform this AI text into something a reader would remember and a detector "
+        "would never flag. Target: 0% AI probability. "
+        "\n\nCREATIVE GHOST-WRITING TECHNIQUES:"
+        "\n• RHYTHM AS WEAPON: Short. Then one that runs and coils and loops, accumulating detail "
+        "and qualification the way memory actually works, not the way a language model processes tokens. "
+        "Short again. The contrast is everything."
+        "\n• NOVEL METAPHOR ONLY: "
+        "'The report had a metabolism.' 'The data breathed in short, anxious intervals.' "
+        "'The argument was architecturally sound and emotionally empty.' "
+        "NEVER: 'navigate the landscape', 'shed light on', 'moving the needle'"
+        "\n• FRAGMENT SENTENCES: Deploy deliberately. One word, even. "
+        "'Silence.' 'Barely.' 'Not quite.' 'That's not it.' "
+        "Fragments almost never appear in AI output — use them."
+        "\n• SYNTACTIC SURPRISE: Start sentences with 'What' or 'Which' or 'How' as noun clause: "
+        "'What nobody said out loud was the more interesting story.' "
+        "'How it ended was less surprising than how long it took.'"
+        "\n• SECOND PERSON PULL: 'You felt it before you saw it.' "
+        "'You could spend a long time looking at those numbers and not know what they meant.'"
+        "\n• ONE-SENTENCE PARAGRAPH MID-PIECE: Changes everything. Human writers do this. LLMs don't."
+        "\n• VOCABULARY REGISTER MIXING: Literary + technical, colloquial + formal. "
+        "Detectors look for register consistency — humans don't have it."
+        "\nPreserve every idea and meaning from the original."
     ),
 }
 
@@ -365,17 +450,27 @@ INTENSITY_INSTRUCTIONS = {
         "• Academic/Professional: NO contractions. Conversational/Journalistic: contractions mandatory."
     ),
     "Deep": (
-        "DEEP TRANSFORMATION: Rebuild every sentence from scratch. Non-negotiable requirements:\n"
-        "• EVERY sentence must be restructured — do not keep any original sentence as-is\n"
-        "• SENTENCE LENGTH MUST VARY WILDLY: include sentences of 4-6 words AND sentences of 35-45 words\n"
-        "• NO two consecutive sentences may follow the same grammatical pattern\n"
-        "• NO sentence may begin with the same word as the previous sentence\n"
-        "• Add 5+ discourse markers and transitions appropriate to the chosen style\n"
-        "• Vary paragraph length: at least one single-sentence paragraph and one 5+ sentence paragraph\n"
-        "• Academic: scholarly hedging + complex subordinate clauses + ZERO contractions\n"
-        "• Conversational: contractions in every other sentence + fragments + rhetorical questions\n"
-        "• The output must read as if written by a real expert human, not an AI\n"
-        "• Preserve 100% of original meaning, data, and terminology"
+        "DEEP GHOST-MODE TRANSFORMATION: Rebuild every sentence to defeat AI detection. Non-negotiable:\n"
+        "• EVERY sentence rebuilt — not a single phrase kept from the original\n"
+        "• SENTENCE LENGTH: Must include sentences of 3-5 words AND 38-50 words. "
+        "NEVER 3 consecutive sentences between 15-25 words.\n"
+        "• PERPLEXITY: Deliberately choose low-probability but natural words. "
+        "'Reshape' not 'impact'. 'Trace' not 'examine'. 'Sit at' not 'is located in'. "
+        "'Dismantle' not 'affect'. 'Fracture' not 'change'. 'Elusive' not 'difficult to find'.\n"
+        "• STRUCTURAL UNPREDICTABILITY: Mix these deliberately:\n"
+        "  — Open a sentence mid-thought with a dash — like this — to break rhythm\n"
+        "  — Use a 1-2 sentence paragraph for punch between longer ones\n"
+        "  — Embed a parenthetical that qualifies (and humanises) mid-sentence\n"
+        "  — Drop in a fragment. Just one word, even.\n"
+        "  — End a paragraph on a tension, contradiction, or open question\n"
+        "• FORBIDDEN TRANSITIONS: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', "
+        "'It is important to note', 'It is worth mentioning', 'Overall', 'In summary'\n"
+        "• CLAUSE DEPTH VARIATION: Alternate between simple declarative (Subject + Verb) and "
+        "complex subordinate (Although X, which Y, despite Z, the analysis W)\n"
+        "• VOCABULARY REGISTER SHIFTS: In academic text, drop in one precise but unexpected colloquial "
+        "phrase. In conversational text, use one precise technical term. This mimics human code-switching.\n"
+        "• AVOID NOUN REPETITION: After first use, replace with pronoun or synonym\n"
+        "• Preserve 100% of original meaning, all data, citations, and technical terms"
     ),
 }
 
