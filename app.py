@@ -2319,7 +2319,7 @@ with tab2:
         with para_clear_col:
             if st.button("🗑️ Clear", key="clear_para_btn", use_container_width=True,
                          disabled=(not para_input.strip())):
-                st.session_state.para_input = ""
+                if 'para_input' in st.session_state: del st.session_state['para_input']
                 st.session_state.paraphrase_out = ""
                 st.rerun()
         pm,pb = st.columns([2,1])
@@ -2366,7 +2366,7 @@ with tab3:
         with gram_clear_col:
             if st.button("🗑️ Clear", key="clear_gram_btn", use_container_width=True,
                          disabled=(not gram_input.strip())):
-                st.session_state.gram_input = ""
+                if 'gram_input' in st.session_state: del st.session_state['gram_input']
                 st.session_state.grammar_corrected = ""
                 st.session_state.grammar_issues = []
                 st.rerun()
@@ -3344,7 +3344,7 @@ with tab5:
         with spss_cl_col:
             if st.button("🗑️ Clear", key="clear_spss_btn", use_container_width=True,
                          disabled=(not st.session_state.get("spss_input_paste","").strip())):
-                st.session_state.spss_input_paste = ""
+                if 'spss_input_paste' in st.session_state: del st.session_state['spss_input_paste']
                 st.session_state.spss_result = {}
                 st.rerun()
 
@@ -3472,7 +3472,7 @@ LIMITATIONS:
         with meth_cl_col:
             if st.button("🗑️ Clear", key="clear_meth_btn", use_container_width=True,
                          disabled=(not st.session_state.get("meth_input_paste","").strip())):
-                st.session_state.meth_input_paste = ""
+                if 'meth_input_paste' in st.session_state: del st.session_state['meth_input_paste']
                 st.session_state.method_result = {}
                 st.rerun()
 
@@ -3568,8 +3568,8 @@ CONCEPTUAL FRAMEWORK HINT:
         with hyp_cl_col:
             if st.button("🗑️ Clear", key="clear_hyp_btn", use_container_width=True,
                          disabled=(not hyp_topic.strip())):
-                st.session_state.hyp_topic = ""
-                st.session_state.hyp_vars  = ""
+                if 'hyp_topic' in st.session_state: del st.session_state['hyp_topic']
+                if 'hyp_vars' in st.session_state: del st.session_state['hyp_vars']
                 st.session_state.hyp_result = {}
                 st.rerun()
         hyp_btn = st.button("🔬 Generate Hypotheses", type="primary",
@@ -3732,7 +3732,7 @@ with tab6:
             with jm_cl_col:
                 if st.button("🗑️ Clear", key="clear_jm_btn", use_container_width=True,
                              disabled=(not st.session_state.get("jm_abstract_paste","").strip())):
-                    st.session_state.jm_abstract_paste = ""
+                    if 'jm_abstract_paste' in st.session_state: del st.session_state['jm_abstract_paste']
                     st.session_state.journal_result = {}
                     st.rerun()
             jm_abstract_final = (st.session_state.get("jm_abstract_paste","") or jm_abstract or
@@ -3828,10 +3828,10 @@ with tab6:
             with cl_cl_col:
                 if st.button("🗑️ Clear", key="clear_cl_btn", use_container_width=True,
                              disabled=(not st.session_state.get("cl_abstract_paste","").strip())):
-                    st.session_state.cl_abstract_paste = ""
-                    st.session_state.cl_title  = ""
-                    st.session_state.cl_journal = ""
-                    st.session_state.cl_authors = ""
+                    if 'cl_abstract_paste' in st.session_state: del st.session_state['cl_abstract_paste']
+                    if 'cl_title' in st.session_state: del st.session_state['cl_title']
+                    if 'cl_journal' in st.session_state: del st.session_state['cl_journal']
+                    if 'cl_authors' in st.session_state: del st.session_state['cl_authors']
                     st.session_state.coverletter_result = {}
                     st.rerun()
             cl_abstract_final = (st.session_state.get("cl_abstract_paste","") or cl_abstract or
@@ -3912,8 +3912,8 @@ with tab6:
             with rv_cl_col:
                 if st.button("🗑️ Clear", key="clear_rv_btn", use_container_width=True,
                              disabled=(not st.session_state.get("rv_comments_paste","").strip())):
-                    st.session_state.rv_comments_paste = ""
-                    st.session_state.rv_abstract_paste = ""
+                    if 'rv_comments_paste' in st.session_state: del st.session_state['rv_comments_paste']
+                    if 'rv_abstract_paste' in st.session_state: del st.session_state['rv_abstract_paste']
                     st.session_state.reviewer_result = {}
                     st.rerun()
             rv_comments_final = (st.session_state.get("rv_comments_paste","") or rv_comments or
@@ -3986,7 +3986,7 @@ with tab6:
                 if st.button("🗑️ Clear All", key="clear_cs_btn", use_container_width=True,
                              disabled=(not cs_title.strip())):
                     for k in ["cs_title","cs_obj","cs_findings","cs_context"]:
-                        st.session_state[k] = ""
+                        if k in st.session_state: del st.session_state[k]
                     st.session_state.contrib_result = {}
                     st.rerun()
             cs_btn = st.button("💡 Generate Contribution Statement", type="primary",
