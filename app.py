@@ -500,8 +500,16 @@ def _build_prompt(style, intensity, chunk):
         "If every sentence is 15-25 words, you have failed.\n"
         "5. No two consecutive sentences may begin with the same word.\n"
         "6. Do NOT invent new facts, statistics, or examples not present in the original.\n"
-        "7. SELF-CHECK before outputting: scan your rewrite for AI patterns listed above "
-        "and fix any you find. Also verify the output format matches the input format.\n\n"
+        "7. PARAGRAPH BOUNDARIES (NON-NEGOTIABLE):\n"
+        "   a) Count the paragraphs in the input. Your output MUST have the same number of paragraphs.\n"
+        "   b) The FIRST paragraph of your output must begin with the SAME opening subject/topic "
+        "as the first paragraph of the input — do not replace or skip the opening idea.\n"
+        "   c) The LAST paragraph of your output must end on the SAME concluding topic/subject "
+        "as the last paragraph of the input — do not drop or replace the closing idea.\n"
+        "   d) Do NOT merge paragraphs together or split one paragraph into two.\n"
+        "   e) Do NOT reorder paragraphs.\n"
+        "8. SELF-CHECK before outputting: scan your rewrite for AI patterns listed above "
+        "and fix any you find. Verify paragraph count matches input. Verify output format matches input format.\n\n"
         f"TEXT TO REWRITE:\n\"\"\"\n{chunk}\n\"\"\"\n"
     )
     return system, user
@@ -2209,11 +2217,19 @@ with tab2:
         st.markdown('<p style="color:#3a8c3f;font-weight:700;">Input</p>', unsafe_allow_html=True)
         para_input = st.text_area("Para",height=300,placeholder="Paste text to paraphrase…",
                                   label_visibility="collapsed",key="para_input")
+        para_wc_col, para_clear_col = st.columns([3,1])
+        with para_wc_col:
+            if para_input.strip():
+                st.markdown(f'<span class="wc-badge">📝 {len(para_input.split()):,} words</span>',unsafe_allow_html=True)
+        with para_clear_col:
+            if st.button("🗑️ Clear", key="clear_para_btn", use_container_width=True,
+                         disabled=(not para_input.strip())):
+                st.session_state.para_input = ""
+                st.session_state.paraphrase_out = ""
+                st.rerun()
         pm,pb = st.columns([2,1])
         with pm: para_mode=st.selectbox("Mode",list(PARAPHRASE_MODES.keys()),label_visibility="collapsed",key="para_mode")
         with pb: para_btn=st.button("🔄 Paraphrase",type="primary",use_container_width=True,disabled=(not para_input.strip()))
-        if para_input.strip():
-            st.markdown(f'<span class="wc-badge">📝 {len(para_input.split()):,} words</span>',unsafe_allow_html=True)
     with p2:
         st.markdown('<p style="color:#3a8c3f;font-weight:700;">Output</p>', unsafe_allow_html=True)
         para_out = st.session_state.paraphrase_out
@@ -2248,9 +2264,18 @@ with tab3:
         st.markdown('<p style="color:#3a8c3f;font-weight:700;">Input</p>', unsafe_allow_html=True)
         gram_input = st.text_area("Grammar",height=300,
             placeholder="Paste text to proofread…",label_visibility="collapsed",key="gram_input")
+        gram_wc_col, gram_clear_col = st.columns([3,1])
+        with gram_wc_col:
+            if gram_input.strip():
+                st.markdown(f'<span class="wc-badge">📝 {len(gram_input.split()):,} words</span>',unsafe_allow_html=True)
+        with gram_clear_col:
+            if st.button("🗑️ Clear", key="clear_gram_btn", use_container_width=True,
+                         disabled=(not gram_input.strip())):
+                st.session_state.gram_input = ""
+                st.session_state.grammar_corrected = ""
+                st.session_state.grammar_issues = []
+                st.rerun()
         gram_btn = st.button("✅ Check Grammar",type="primary",use_container_width=True,disabled=(not gram_input.strip()))
-        if gram_input.strip():
-            st.markdown(f'<span class="wc-badge">📝 {len(gram_input.split()):,} words</span>',unsafe_allow_html=True)
     with g2:
         st.markdown('<p style="color:#3a8c3f;font-weight:700;">Corrected Text</p>', unsafe_allow_html=True)
         gram_corrected = st.session_state.grammar_corrected
@@ -3216,6 +3241,18 @@ with tab5:
                         st.text(spss_input[:600] + ("…" if len(spss_input) > 600 else ""))
 
         # Use paste if filled, else use file
+        spss_wc_col, spss_cl_col = st.columns([3,1])
+        with spss_wc_col:
+            spss_paste_val = st.session_state.get("spss_input_paste","")
+            if spss_paste_val.strip():
+                st.markdown(f'<span class="wc-badge">📝 {len(spss_paste_val.split()):,} words</span>', unsafe_allow_html=True)
+        with spss_cl_col:
+            if st.button("🗑️ Clear", key="clear_spss_btn", use_container_width=True,
+                         disabled=(not st.session_state.get("spss_input_paste","").strip())):
+                st.session_state.spss_input_paste = ""
+                st.session_state.spss_result = {}
+                st.rerun()
+
         spss_final = (st.session_state.get("spss_input_paste","") or spss_input).strip()
 
         spss_btn = st.button("🔍 Interpret Output", type="primary",
@@ -3332,6 +3369,18 @@ LIMITATIONS:
                     with st.expander("Preview"):
                         st.text(meth_input[:500] + ("…" if len(meth_input) > 500 else ""))
 
+        meth_wc_col, meth_cl_col = st.columns([3,1])
+        with meth_wc_col:
+            meth_paste_val = st.session_state.get("meth_input_paste","")
+            if meth_paste_val.strip():
+                st.markdown(f'<span class="wc-badge">📝 {len(meth_paste_val.split()):,} words</span>', unsafe_allow_html=True)
+        with meth_cl_col:
+            if st.button("🗑️ Clear", key="clear_meth_btn", use_container_width=True,
+                         disabled=(not st.session_state.get("meth_input_paste","").strip())):
+                st.session_state.meth_input_paste = ""
+                st.session_state.method_result = {}
+                st.rerun()
+
         meth_final = (st.session_state.get("meth_input_paste","") or meth_input).strip()
 
         meth_btn = st.button("🧪 Recommend Methodology", type="primary",
@@ -3417,6 +3466,17 @@ CONCEPTUAL FRAMEWORK HINT:
                 placeholder="ESG disclosure score\nFirm valuation (Tobin's Q)\nFirm size\nLeverage\nProfitability (ROA)",
                 label_visibility="visible", key="hyp_vars")
 
+        hyp_wc_col, hyp_cl_col = st.columns([3,1])
+        with hyp_wc_col:
+            if hyp_topic.strip():
+                st.markdown(f'<span class="wc-badge">📝 {len(hyp_topic.split()):,} words</span>', unsafe_allow_html=True)
+        with hyp_cl_col:
+            if st.button("🗑️ Clear", key="clear_hyp_btn", use_container_width=True,
+                         disabled=(not hyp_topic.strip())):
+                st.session_state.hyp_topic = ""
+                st.session_state.hyp_vars  = ""
+                st.session_state.hyp_result = {}
+                st.rerun()
         hyp_btn = st.button("🔬 Generate Hypotheses", type="primary",
                             disabled=(not hyp_topic.strip() or not groq_key), key="hyp_btn")
 
@@ -3569,6 +3629,17 @@ with tab6:
                     if jm_text_extracted and not jm_text_extracted.startswith("["):
                         st.success(f"✅ Loaded: {jm_file.name}")
                         with st.expander("Preview"): st.text(jm_text_extracted[:400]+"…")
+            jm_wc_col, jm_cl_col = st.columns([3,1])
+            with jm_wc_col:
+                jm_pv = st.session_state.get("jm_abstract_paste","")
+                if jm_pv.strip():
+                    st.markdown(f'<span class="wc-badge">📝 {len(jm_pv.split()):,} words</span>', unsafe_allow_html=True)
+            with jm_cl_col:
+                if st.button("🗑️ Clear", key="clear_jm_btn", use_container_width=True,
+                             disabled=(not st.session_state.get("jm_abstract_paste","").strip())):
+                    st.session_state.jm_abstract_paste = ""
+                    st.session_state.journal_result = {}
+                    st.rerun()
             jm_abstract_final = (st.session_state.get("jm_abstract_paste","") or jm_abstract or
                                   (jm_text_extracted if "jm_text_extracted" in dir() and jm_text_extracted else ""))
         with jc2:
@@ -3654,6 +3725,20 @@ with tab6:
                     cl_extracted = _extract_file_text(cl_file)
                     if cl_extracted and not cl_extracted.startswith("["):
                         st.success(f"✅ {cl_file.name}")
+            cl_wc_col, cl_cl_col = st.columns([3,1])
+            with cl_wc_col:
+                cl_pv = st.session_state.get("cl_abstract_paste","")
+                if cl_pv.strip():
+                    st.markdown(f'<span class="wc-badge">📝 {len(cl_pv.split()):,} words</span>', unsafe_allow_html=True)
+            with cl_cl_col:
+                if st.button("🗑️ Clear", key="clear_cl_btn", use_container_width=True,
+                             disabled=(not st.session_state.get("cl_abstract_paste","").strip())):
+                    st.session_state.cl_abstract_paste = ""
+                    st.session_state.cl_title  = ""
+                    st.session_state.cl_journal = ""
+                    st.session_state.cl_authors = ""
+                    st.session_state.coverletter_result = {}
+                    st.rerun()
             cl_abstract_final = (st.session_state.get("cl_abstract_paste","") or cl_abstract or
                                   (cl_extracted if "cl_extracted" in dir() and cl_extracted else ""))
             cl_btn = st.button("✉️ Write Cover Letter", type="primary",
@@ -3724,6 +3809,18 @@ with tab6:
                     if rv_comments_text and not rv_comments_text.startswith("["):
                         st.success(f"✅ {rv_comments_file.name}")
                         with st.expander("Preview"): st.text(rv_comments_text[:400]+"…")
+            rv_wc_col, rv_cl_col = st.columns([3,1])
+            with rv_wc_col:
+                rv_pv = st.session_state.get("rv_comments_paste","")
+                if rv_pv.strip():
+                    st.markdown(f'<span class="wc-badge">📝 {len(rv_pv.split()):,} words</span>', unsafe_allow_html=True)
+            with rv_cl_col:
+                if st.button("🗑️ Clear", key="clear_rv_btn", use_container_width=True,
+                             disabled=(not st.session_state.get("rv_comments_paste","").strip())):
+                    st.session_state.rv_comments_paste = ""
+                    st.session_state.rv_abstract_paste = ""
+                    st.session_state.reviewer_result = {}
+                    st.rerun()
             rv_comments_final = (st.session_state.get("rv_comments_paste","") or rv_comments or
                                   (rv_comments_text if "rv_comments_text" in dir() and rv_comments_text else ""))
 
@@ -3789,6 +3886,14 @@ with tab6:
                 placeholder="e.g. ESG disclosure positively moderates the relationship…", label_visibility="visible")
             cs_context = st.text_input("Study context / setting", key="cs_context",
                 placeholder="e.g. BSE 500 firms, India, 2018-2023, BRSR era")
+            cs_cl_col1, cs_cl_col2 = st.columns([3,1])
+            with cs_cl_col2:
+                if st.button("🗑️ Clear All", key="clear_cs_btn", use_container_width=True,
+                             disabled=(not cs_title.strip())):
+                    for k in ["cs_title","cs_obj","cs_findings","cs_context"]:
+                        st.session_state[k] = ""
+                    st.session_state.contrib_result = {}
+                    st.rerun()
             cs_btn = st.button("💡 Generate Contribution Statement", type="primary",
                                disabled=(not cs_title.strip() or not groq_key), key="cs_btn")
         with csc2:
