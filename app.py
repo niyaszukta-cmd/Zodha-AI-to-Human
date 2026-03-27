@@ -1998,7 +1998,10 @@ div[data-testid="stAlert"] p{color:#1a2e1b!important;}
 # ══════════════════════════════════════════════════════════════════════════════
 for k,v in [("output_text",""),("paraphrase_out",""),
              ("grammar_corrected",""),("grammar_issues",[]),
-             ("clear_input",False),("show_admin",False),("admin_auth",False),
+             ("clear_input",False),("clear_para",False),("clear_gram",False),
+             ("clear_spss",False),("clear_meth",False),("clear_hyp",False),
+             ("clear_jm",False),("clear_cl",False),("clear_rv",False),("clear_cs",False),
+             ("show_admin",False),("admin_auth",False),
              ("spss_result",{}),("method_result",{}),("hyp_result",{}),("var_result",{}),
              ("lit_chapter_text",""),("lit_chapter_topic",""),("lit_chapter_style","APA 7th"),
              ("journal_result",{}),("coverletter_result",{}),
@@ -2009,6 +2012,58 @@ if st.session_state.clear_input:
     st.session_state.input_text=""
     st.session_state.output_text=""
     st.session_state.clear_input=False
+
+if st.session_state.clear_para:
+    st.session_state.para_input=""
+    st.session_state.paraphrase_out=""
+    st.session_state.clear_para=False
+
+if st.session_state.clear_gram:
+    st.session_state.gram_input=""
+    st.session_state.grammar_corrected=""
+    st.session_state.grammar_issues=[]
+    st.session_state.clear_gram=False
+
+if st.session_state.clear_spss:
+    st.session_state.spss_input_paste=""
+    st.session_state.spss_result={}
+    st.session_state.clear_spss=False
+
+if st.session_state.clear_meth:
+    st.session_state.meth_input_paste=""
+    st.session_state.method_result={}
+    st.session_state.clear_meth=False
+
+if st.session_state.clear_hyp:
+    st.session_state.hyp_topic=""
+    st.session_state.hyp_vars=""
+    st.session_state.hyp_result={}
+    st.session_state.clear_hyp=False
+
+if st.session_state.clear_jm:
+    st.session_state.jm_abstract_paste=""
+    st.session_state.journal_result={}
+    st.session_state.clear_jm=False
+
+if st.session_state.clear_cl:
+    st.session_state.cl_abstract_paste=""
+    st.session_state.cl_title=""
+    st.session_state.cl_journal=""
+    st.session_state.cl_authors=""
+    st.session_state.coverletter_result={}
+    st.session_state.clear_cl=False
+
+if st.session_state.clear_rv:
+    st.session_state.rv_comments_paste=""
+    st.session_state.rv_abstract_paste=""
+    st.session_state.reviewer_result={}
+    st.session_state.clear_rv=False
+
+if st.session_state.clear_cs:
+    for k in ["cs_title","cs_obj","cs_findings","cs_context"]:
+        st.session_state[k]=""
+    st.session_state.contrib_result={}
+    st.session_state.clear_cs=False
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ADMIN PANEL (hidden, password-protected overlay)
@@ -2319,8 +2374,7 @@ with tab2:
         with para_clear_col:
             if st.button("🗑️ Clear", key="clear_para_btn", use_container_width=True,
                          disabled=(not para_input.strip())):
-                if 'para_input' in st.session_state: del st.session_state['para_input']
-                st.session_state.paraphrase_out = ""
+                st.session_state.clear_para = True
                 st.rerun()
         pm,pb = st.columns([2,1])
         with pm: para_mode=st.selectbox("Mode",list(PARAPHRASE_MODES.keys()),label_visibility="collapsed",key="para_mode")
@@ -2366,9 +2420,7 @@ with tab3:
         with gram_clear_col:
             if st.button("🗑️ Clear", key="clear_gram_btn", use_container_width=True,
                          disabled=(not gram_input.strip())):
-                if 'gram_input' in st.session_state: del st.session_state['gram_input']
-                st.session_state.grammar_corrected = ""
-                st.session_state.grammar_issues = []
+                st.session_state.clear_gram = True
                 st.rerun()
         gram_btn = st.button("✅ Check Grammar",type="primary",use_container_width=True,disabled=(not gram_input.strip()))
     with g2:
@@ -3344,8 +3396,7 @@ with tab5:
         with spss_cl_col:
             if st.button("🗑️ Clear", key="clear_spss_btn", use_container_width=True,
                          disabled=(not st.session_state.get("spss_input_paste","").strip())):
-                if 'spss_input_paste' in st.session_state: del st.session_state['spss_input_paste']
-                st.session_state.spss_result = {}
+                st.session_state.clear_spss = True
                 st.rerun()
 
         spss_final = (st.session_state.get("spss_input_paste","") or spss_input).strip()
@@ -3472,8 +3523,7 @@ LIMITATIONS:
         with meth_cl_col:
             if st.button("🗑️ Clear", key="clear_meth_btn", use_container_width=True,
                          disabled=(not st.session_state.get("meth_input_paste","").strip())):
-                if 'meth_input_paste' in st.session_state: del st.session_state['meth_input_paste']
-                st.session_state.method_result = {}
+                st.session_state.clear_meth = True
                 st.rerun()
 
         meth_final = (st.session_state.get("meth_input_paste","") or meth_input).strip()
@@ -3568,9 +3618,7 @@ CONCEPTUAL FRAMEWORK HINT:
         with hyp_cl_col:
             if st.button("🗑️ Clear", key="clear_hyp_btn", use_container_width=True,
                          disabled=(not hyp_topic.strip())):
-                if 'hyp_topic' in st.session_state: del st.session_state['hyp_topic']
-                if 'hyp_vars' in st.session_state: del st.session_state['hyp_vars']
-                st.session_state.hyp_result = {}
+                st.session_state.clear_hyp = True
                 st.rerun()
         hyp_btn = st.button("🔬 Generate Hypotheses", type="primary",
                             disabled=(not hyp_topic.strip() or not groq_key), key="hyp_btn")
@@ -3732,8 +3780,7 @@ with tab6:
             with jm_cl_col:
                 if st.button("🗑️ Clear", key="clear_jm_btn", use_container_width=True,
                              disabled=(not st.session_state.get("jm_abstract_paste","").strip())):
-                    if 'jm_abstract_paste' in st.session_state: del st.session_state['jm_abstract_paste']
-                    st.session_state.journal_result = {}
+                    st.session_state.clear_jm = True
                     st.rerun()
             jm_abstract_final = (st.session_state.get("jm_abstract_paste","") or jm_abstract or
                                   (jm_text_extracted if "jm_text_extracted" in dir() and jm_text_extracted else ""))
@@ -3828,11 +3875,7 @@ with tab6:
             with cl_cl_col:
                 if st.button("🗑️ Clear", key="clear_cl_btn", use_container_width=True,
                              disabled=(not st.session_state.get("cl_abstract_paste","").strip())):
-                    if 'cl_abstract_paste' in st.session_state: del st.session_state['cl_abstract_paste']
-                    if 'cl_title' in st.session_state: del st.session_state['cl_title']
-                    if 'cl_journal' in st.session_state: del st.session_state['cl_journal']
-                    if 'cl_authors' in st.session_state: del st.session_state['cl_authors']
-                    st.session_state.coverletter_result = {}
+                    st.session_state.clear_cl = True
                     st.rerun()
             cl_abstract_final = (st.session_state.get("cl_abstract_paste","") or cl_abstract or
                                   (cl_extracted if "cl_extracted" in dir() and cl_extracted else ""))
@@ -3912,9 +3955,7 @@ with tab6:
             with rv_cl_col:
                 if st.button("🗑️ Clear", key="clear_rv_btn", use_container_width=True,
                              disabled=(not st.session_state.get("rv_comments_paste","").strip())):
-                    if 'rv_comments_paste' in st.session_state: del st.session_state['rv_comments_paste']
-                    if 'rv_abstract_paste' in st.session_state: del st.session_state['rv_abstract_paste']
-                    st.session_state.reviewer_result = {}
+                    st.session_state.clear_rv = True
                     st.rerun()
             rv_comments_final = (st.session_state.get("rv_comments_paste","") or rv_comments or
                                   (rv_comments_text if "rv_comments_text" in dir() and rv_comments_text else ""))
@@ -3985,9 +4026,7 @@ with tab6:
             with cs_cl_col2:
                 if st.button("🗑️ Clear All", key="clear_cs_btn", use_container_width=True,
                              disabled=(not cs_title.strip())):
-                    for k in ["cs_title","cs_obj","cs_findings","cs_context"]:
-                        if k in st.session_state: del st.session_state[k]
-                    st.session_state.contrib_result = {}
+                    st.session_state.clear_cs = True
                     st.rerun()
             cs_btn = st.button("💡 Generate Contribution Statement", type="primary",
                                disabled=(not cs_title.strip() or not groq_key), key="cs_btn")
