@@ -580,6 +580,7 @@ def _build_prompt(style, intensity, chunk):
 
     user = (
         "TASK: Rewrite the text below to maximise humanness score.\n\n"
+        f"WORD COUNT CONSTRAINT (STRICT): The input has {len(chunk.split())} words. Your output MUST be between {max(10, int(len(chunk.split())*0.88))} and {int(len(chunk.split())*1.12)} words — within ±12% of the input length. Do NOT pad, expand, or add new content. Rewrite; do not inflate.\n\n"
         f"INTENSITY LEVEL:\n{note}\n\n"
         f"REGISTER REQUIREMENTS:\n{reg}\n\n"
         f"{anti_ai}\n\n"
@@ -736,27 +737,41 @@ def stream_groq(api_key, model, system_prompt, user_prompt, max_tokens=2048):
 
 def humanize_streaming(api_key, model, chunk, style, intensity, placeholder):
     system, user = _build_prompt(style, intensity, chunk)
+    # Cap tokens to ~1.2× input to prevent word bloat
+    # ~1.4 tokens per word on average; cap at 1.2× word count × 1.5 tokens
+    input_words = len(chunk.split())
+    max_tok = max(256, min(3500, int(input_words * 2.1)))
     full_text = ""
     import html as _html
 
     def render_output(text, cursor=False):
         """
-        Render output preserving bullet/numbered list formatting.
-        Uses Streamlit markdown for lists, html.escape for prose.
+        Render output with correct formatting:
+        - Bullet/numbered lists: native Streamlit markdown
+        - Prose: paragraph-wrapped HTML with justified alignment
         """
+        import html as _html2
         fmt = detect_format(text)
+        cur = "▌" if cursor else ""
+
         if fmt['format_type'] in ('bullets', 'numbered', 'mixed', 'headings'):
-            # Use native Streamlit markdown — it renders •, -, 1. etc. correctly
-            cursor_str = "▌" if cursor else ""
-            placeholder.markdown(text + cursor_str)
+            placeholder.markdown(text + cur)
         else:
-            safe = _html.escape(text)
-            cur  = "▌" if cursor else ""
+            # Convert double-newline separated paragraphs to <p> tags
+            paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+            if not paras:
+                paras = [text]
+            html_paras = "".join(
+                f'<p style="margin:0 0 0.8em 0;text-indent:0;">{_html2.escape(p)}</p>'
+                for p in paras
+            )
+            if cursor:
+                html_paras = html_paras.rstrip("</p>") + cur + "</p>"
             placeholder.markdown(
-                f'<div class="output-box" style="min-height:100px;">{safe}{cur}</div>',
+                f'<div class="output-box" style="min-height:100px;">{html_paras}</div>',
                 unsafe_allow_html=True)
 
-    for token in stream_groq(api_key, model, system, user):
+    for token in stream_groq(api_key, model, system, user, max_tokens=max_tok):
         full_text += token
         render_output(full_text, cursor=True)
 
@@ -1941,6 +1956,119 @@ def fetch_articles_from_dois(api_key: str, model: str, dois: list,
 
     return articles
 
+
+def build_journal_excel(jm_result: dict) -> bytes:
+    """Build a formatted Excel workbook from Journal Matcher results."""
+    if not XLSX_OK:
+        return b""
+    import io as _io_jm
+    from openpyxl import Workbook as JWB
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    wb = JWB()
+    ws = wb.active
+    ws.title = "Journal Recommendations"
+
+    # ── Colors ─────────────────────────────────────────────────────
+    HDR_FILL  = PatternFill("solid", fgColor="0F3312")
+    ALT_FILL  = PatternFill("solid", fgColor="F0F7F0")
+    WHT_FILL  = PatternFill("solid", fgColor="FFFFFF")
+    GRN_FILL  = PatternFill("solid", fgColor="1E5C22")
+    THIN      = Side(style="thin", color="3A8C3F")
+    BORDER    = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+    def hdr_font(sz=11): return Font(name="Calibri", bold=True, color="FFFFFF", size=sz)
+    def body_font(bold=False): return Font(name="Calibri", bold=bold, color="0A1E0B", size=10)
+    def green_font(): return Font(name="Calibri", bold=True, color="1E5C22", size=10)
+
+    # ── Title row ───────────────────────────────────────────────────
+    ws.merge_cells("A1:J1")
+    ws["A1"] = f"Journal Recommendations — {jm_result.get('research_domain','')}"
+    ws["A1"].font = Font(name="Calibri", bold=True, color="FFFFFF", size=14)
+    ws["A1"].fill = PatternFill("solid", fgColor="0F3312")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[1].height = 28
+
+    # ── Header row ──────────────────────────────────────────────────
+    headers = ["#", "Journal Name", "Publisher", "Index", "Impact Factor",
+               "Open Access", "Acceptance Rate", "Turnaround (wks)", "Scope Fit", "Submission URL"]
+    col_widths = [4, 38, 24, 14, 12, 12, 16, 16, 50, 40]
+
+    for col, (hdr, w) in enumerate(zip(headers, col_widths), 1):
+        cell = ws.cell(row=2, column=col, value=hdr)
+        cell.font    = hdr_font()
+        cell.fill    = PatternFill("solid", fgColor="1E5C22")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border  = BORDER
+        ws.column_dimensions[chr(64+col)].width = w
+    ws.row_dimensions[2].height = 20
+
+    # ── Data rows ───────────────────────────────────────────────────
+    recs = jm_result.get("recommendations", [])
+    for i, j in enumerate(recs, 1):
+        row   = i + 2
+        fill  = ALT_FILL if i % 2 == 0 else WHT_FILL
+        data  = [
+            i,
+            j.get("name", ""),
+            j.get("publisher", ""),
+            j.get("index", ""),
+            str(j.get("impact_factor", "")),
+            j.get("open_access", ""),
+            str(j.get("acceptance_rate", "")),
+            str(j.get("turnaround", "")),
+            j.get("scope_fit", ""),
+            j.get("submission_url", ""),
+        ]
+        for col, val in enumerate(data, 1):
+            cell = ws.cell(row=row, column=col, value=val)
+            cell.fill      = fill
+            cell.border    = BORDER
+            cell.alignment = Alignment(vertical="top", wrap_text=True,
+                                        horizontal="center" if col in (1,4,5,6,7,8) else "left")
+            if col == 1:
+                cell.font = green_font()
+            elif col == 2:
+                cell.font = body_font(bold=True)
+            elif col == 4:
+                # Index badge — highlight by tier
+                tier_colors = {"ABDC A":"1A4A1C","ABDC B":"2D5C1E","Scopus":"0C3A7C",
+                               "ABDC C":"5C4A00","UGC CARE":"5C1A1A","ABS":"3A1A5C"}
+                tier_fill   = tier_colors.get(str(val), "1E5C22")
+                cell.fill   = PatternFill("solid", fgColor=tier_fill)
+                cell.font   = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
+            else:
+                cell.font = body_font()
+        ws.row_dimensions[row].height = max(20, min(60, len(str(data[8]))//3))
+
+    # ── Strategy note ───────────────────────────────────────────────
+    strategy = jm_result.get("strategy_note", "")
+    if strategy:
+        note_row = len(recs) + 4
+        ws.merge_cells(f"A{note_row}:J{note_row}")
+        ws[f"A{note_row}"] = f"📌 Submission Strategy: {strategy}"
+        ws[f"A{note_row}"].font      = Font(name="Calibri", italic=True, color="1E5C22", size=10)
+        ws[f"A{note_row}"].alignment = Alignment(wrap_text=True, vertical="top")
+        ws[f"A{note_row}"].fill      = PatternFill("solid", fgColor="F0F7F0")
+        ws.row_dimensions[note_row].height = max(20, len(strategy)//6)
+
+    # ── Avoid list ─────────────────────────────────────────────────
+    avoid = jm_result.get("avoid", [])
+    if avoid:
+        avoid_row = len(recs) + 6
+        ws.merge_cells(f"A{avoid_row}:J{avoid_row}")
+        ws[f"A{avoid_row}"] = "⚠️ Journals to avoid: " + " | ".join(str(a) for a in avoid)
+        ws[f"A{avoid_row}"].font      = Font(name="Calibri", color="CC3333", size=10)
+        ws[f"A{avoid_row}"].alignment = Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[avoid_row].height = 20
+
+    # Freeze header rows
+    ws.freeze_panes = "A3"
+
+    buf = _io_jm.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG & CSS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1966,8 +2094,8 @@ html,body,[class*="css"]{font-family:'DM Sans',sans-serif;background-color:#ffff
 .metric-row{display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.4rem;}
 .metric-chip{background:#f0f7f0;border:1px solid #b0d4b2;border-radius:7px;padding:0.35rem 0.7rem;font-size:0.78rem;color:#2d5c30;}
 .metric-chip b{color:#1a2e1b;font-weight:600;}
-.output-box{background:white;border:1.5px solid #3a8c3f;border-radius:10px;padding:1rem 1.2rem;height:380px;overflow-y:auto;overflow-x:hidden;font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;color:#1a2e1b;white-space:pre-wrap;word-break:break-word;box-sizing:border-box;}
-.output-box-sm{background:white;border:1.5px solid #3a8c3f;border-radius:10px;padding:1rem 1.2rem;height:320px;overflow-y:auto;font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.7;color:#1a2e1b;white-space:pre-wrap;word-break:break-word;}
+.output-box{background:white;border:1.5px solid #3a8c3f;border-radius:10px;padding:1rem 1.2rem;height:380px;overflow-y:auto;overflow-x:hidden;font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.75;color:#1a2e1b;word-break:break-word;box-sizing:border-box;text-align:justify;}
+.output-box-sm{background:white;border:1.5px solid #3a8c3f;border-radius:10px;padding:1rem 1.2rem;height:320px;overflow-y:auto;font-family:'DM Sans',sans-serif;font-size:0.9rem;line-height:1.75;color:#1a2e1b;word-break:break-word;text-align:justify;}
 .wc-badge{display:inline-block;background:#f0f7f0;border:1px solid #b0d4b2;border-radius:6px;padding:0.2rem 0.6rem;font-family:'DM Mono',monospace;font-size:0.75rem;color:#2d5c30;margin-top:0.3rem;}
 textarea{font-family:'DM Sans',sans-serif!important;font-size:0.9rem!important;line-height:1.65!important;border-radius:10px!important;border:1.5px solid #b0d4b2!important;background:white!important;color:#1a2e1b!important;}
 div[data-testid="stButton"]>button[kind="primary"]{background:linear-gradient(135deg,#1e5c22,#3a8c3f)!important;color:#ffffff!important;border:1.5px solid #3a8c3f!important;border-radius:10px!important;font-family:'DM Sans',sans-serif!important;font-weight:600!important;transition:all 0.25s!important;}
@@ -2384,7 +2512,10 @@ with tab2:
         para_out = st.session_state.paraphrase_out
         if para_out.strip():
             import html as _html
-            st.markdown(f'<div class="output-box-sm">{_html.escape(para_out)}</div>',unsafe_allow_html=True)
+            _paras_para = [p.strip() for p in para_out.split("\n\n") if p.strip()]
+            if not _paras_para: _paras_para=[para_out]
+            _html_para  = "".join(f'<p style="margin:0 0 0.8em 0;">{_html.escape(p)}</p>' for p in _paras_para)
+            st.markdown(f'<div class="output-box-sm">{_html_para}</div>',unsafe_allow_html=True)
             make_copy_btn("para-out",para_out,"📋 Copy")
             st.markdown(f'<span class="wc-badge">📝 {len(para_out.split()):,} words</span>',unsafe_allow_html=True)
         else:
@@ -3846,6 +3977,17 @@ with tab6:
                     for j in jm_res.get("avoid",[]):
                         st.markdown(f"• {_html.escape(str(j))}")
             make_copy_btn("jm-full", "\n".join(jm_text), "📋 Copy Journal List")
+            if XLSX_OK and jm_res.get("recommendations"):
+                from datetime import datetime as _dt
+                jm_xl = build_journal_excel(jm_res)
+                st.download_button(
+                    label="📊 Download as Excel (.xlsx)",
+                    data=jm_xl,
+                    file_name=f"journal_recommendations_{_dt.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="dl_jm_excel"
+                )
 
     # ── P2: COVER LETTER WRITER ──────────────────────────────────────────────
     with p2:
