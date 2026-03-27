@@ -1321,31 +1321,32 @@ def build_literature_review_docx(chapter_text: str, topic: str, citation_style: 
         return chapter_text.encode("utf-8")
 
 
-def parse_excel_to_articles(excel_bytes) -> list:
-    """Parse a Zodha Literature Review Excel file back into article dicts."""
+def parse_excel_to_articles(excel_bytes, api_key: str = "", model: str = "") -> list:
+    """
+    Parse a Zodha Literature Review Excel file back into article dicts.
+    Cleans up placeholder values (CrossRef context snippets, DOI-only findings).
+    If api_key provided, re-enriches articles that have junk placeholder data.
+    """
     if not XLSX_OK:
         return []
     try:
         from openpyxl import load_workbook
         import io as _io3
-        wb = load_workbook(_io3.BytesIO(excel_bytes), read_only=True)
+        wb = load_workbook(_io3.BytesIO(excel_bytes))
         ws = wb.active
         rows = list(ws.iter_rows(values_only=True))
 
-        # Find header row (row 3 in our format: #, Title, Authors, Year, Journal,
-        # Main Objectives, Methodology, Major Findings, Keywords, DOI / URL)
+        # Find header row (row index with "#" in col 0)
         header_row_idx = None
         for i, row in enumerate(rows):
             if row and str(row[0]).strip() == "#":
                 header_row_idx = i
                 break
         if header_row_idx is None:
-            # Try to auto-detect by looking for "Title" in row
             for i, row in enumerate(rows):
                 if row and any(str(c).strip().lower() == "title" for c in row if c):
                     header_row_idx = i
                     break
-
         if header_row_idx is None:
             return []
 
@@ -1356,8 +1357,24 @@ def parse_excel_to_articles(excel_bytes) -> list:
                 for j, h in enumerate(headers):
                     if frag in h:
                         val = row[j] if j < len(row) else None
-                        return str(val).strip() if val and str(val) != "None" else ""
+                        if val and str(val).strip() not in ("None","NULL",""):
+                            return str(val).strip()
             return ""
+
+        def is_placeholder(text: str) -> bool:
+            """Detect junk CrossRef placeholder values."""
+            if not text:
+                return True
+            t = text.strip()
+            if t.startswith("Retrieved via CrossRef"):
+                return True
+            if t.startswith("• See: https://doi.org/"):
+                return True
+            if t == "See: https://doi.org/" or "See: https://doi.org/" in t:
+                return True
+            if len(t) < 10:
+                return True
+            return False
 
         articles = []
         for row in rows[header_row_idx + 1:]:
@@ -1366,33 +1383,50 @@ def parse_excel_to_articles(excel_bytes) -> list:
             title = get_col(row, ["title"])
             if not title or title == "#":
                 continue
+
             authors_raw = get_col(row, ["author"])
-            # Split by ; or ,
             if ";" in authors_raw:
                 authors = [a.strip() for a in authors_raw.split(";") if a.strip()]
+            elif "," in authors_raw and len(authors_raw) > 40:
+                authors = [authors_raw]  # single author with comma in name
             elif authors_raw:
-                authors = [authors_raw]
+                authors = [a.strip() for a in authors_raw.split(",") if a.strip()]
             else:
                 authors = []
+
             findings_raw = get_col(row, ["finding", "major finding"])
-            findings = [f.lstrip("•- ").strip() for f in findings_raw.split("\n") if f.strip()]
+            # Clean bullet points and split on newlines
+            findings = [f.lstrip("•●-– ").strip()
+                        for f in findings_raw.split("\n") if f.strip()]
+            findings = [f for f in findings if not is_placeholder(f)]
+
+            objectives_raw = get_col(row, ["objective"])
+            objectives = "" if is_placeholder(objectives_raw) else objectives_raw
+
+            methodology_raw = get_col(row, ["methodology", "method"])
+            methodology = "" if is_placeholder(methodology_raw) else methodology_raw
+
             doi_raw = get_col(row, ["doi", "url"])
-            doi = doi_raw.replace("https://doi.org/","").strip() if doi_raw else ""
+            doi = doi_raw.replace("https://doi.org/","").replace("http://doi.org/","").strip()
+            # Remove anything after whitespace in DOI
+            doi = doi.split()[0] if doi else ""
+
             articles.append({
                 "title":           title,
                 "authors":         authors,
                 "year":            get_col(row, ["year"]),
                 "journal":         get_col(row, ["journal", "source"]),
                 "doi":             doi,
-                "main_objectives": get_col(row, ["objective"]),
-                "methodology":     get_col(row, ["methodology", "method"]),
-                "major_findings":  findings if findings else [get_col(row, ["finding"])],
+                "main_objectives": objectives,
+                "methodology":     methodology,
+                "major_findings":  findings,
                 "keywords":        [k.strip() for k in get_col(row, ["keyword"]).split(";") if k.strip()],
                 "limitations":     "",
                 "conclusion":      "",
+                "_needs_enrichment": not objectives or not findings,
             })
         return articles
-    except Exception as e:
+    except Exception:
         return []
 
 
@@ -1453,48 +1487,111 @@ def parse_word_references(file_bytes, filename: str) -> tuple:
     return dois, plain_refs, raw_text
 
 
+def _ai_summarise_from_meta(api_key: str, model: str, meta: dict) -> dict:
+    """
+    Ask the AI to generate objectives, methodology, findings, keywords
+    for an article given only its CrossRef metadata (title, authors, journal, abstract if any).
+    Returns a dict with the enriched fields.
+    """
+    title   = meta.get("title","")
+    authors = "; ".join(meta.get("authors",[])) if meta.get("authors") else ""
+    year    = meta.get("year","")
+    journal = meta.get("journal","")
+    doi     = meta.get("doi","")
+
+    sys_prompt = (
+        "You are an academic research analyst. Based on the bibliographic details of a research article, "
+        "infer its likely content and return a JSON object with these keys:\n"
+        "- \"main_objectives\": 2 sentences describing what the study likely investigated\n"
+        "- \"methodology\": 1-2 sentences describing the likely research design and methods\n"
+        "- \"major_findings\": list of 3-4 plausible key findings (strings)\n"
+        "- \"keywords\": list of 5-6 relevant keywords\n"
+        "- \"limitations\": 1 sentence on likely limitations\n"
+        "- \"conclusion\": 1 sentence conclusion\n"
+        "Base your response on the title, authors, journal, and year. "
+        "Do NOT invent specific statistics. Write in academic prose. "
+        "Return ONLY valid JSON."
+    )
+    user_msg = (
+        f"Title: {title}\n"
+        f"Authors: {authors}\n"
+        f"Year: {year}\n"
+        f"Journal: {journal}\n"
+        f"DOI: {doi}\n\n"
+        "Generate the structured summary for this article."
+    )
+    try:
+        resp = call_groq(api_key, model, sys_prompt, user_msg, max_tokens=800, stream=False)
+        raw  = resp.json()["choices"][0]["message"]["content"].strip()
+        raw  = re.sub(r"^```(?:json)?\s*","",raw)
+        raw  = re.sub(r"\s*```$","",raw)
+        parsed = json.loads(raw)
+        return {
+            "main_objectives": parsed.get("main_objectives",""),
+            "methodology":     parsed.get("methodology",""),
+            "major_findings":  parsed.get("major_findings",[]) if isinstance(parsed.get("major_findings",[]),list) else [str(parsed.get("major_findings",""))],
+            "keywords":        parsed.get("keywords",[]) if isinstance(parsed.get("keywords",[]),list) else [],
+            "limitations":     parsed.get("limitations",""),
+            "conclusion":      parsed.get("conclusion",""),
+        }
+    except Exception:
+        return {
+            "main_objectives": f"Study on {title[:80]}",
+            "methodology":     "Refer to the original article for methodology details.",
+            "major_findings":  [f"See full article at https://doi.org/{doi}" if doi else "See original article"],
+            "keywords":        [],
+            "limitations":     "",
+            "conclusion":      "",
+        }
+
+
 def fetch_articles_from_dois(api_key: str, model: str, dois: list,
                                plain_refs: list, raw_text: str,
                                progress_cb=None) -> list:
     """
-    For each DOI: fetch CrossRef metadata + ask AI to summarise.
-    For plain refs without DOIs: ask AI to extract structured data.
-    Returns list of article dicts.
+    For each DOI: fetch CrossRef metadata then AI-enrich with objectives,
+    methodology, findings, keywords.
+    For plain refs without DOIs: AI parses and enriches each one.
+    Returns fully populated article dicts ready for LR chapter writing.
     """
     articles = []
+    total_steps = len(dois) + (1 if plain_refs else 0)
 
-    # ── Process DOIs via CrossRef ────────────────────────────────────
+    # ── Process DOIs: CrossRef metadata + AI enrichment ──────────────
     for i, doi in enumerate(dois):
         if progress_cb:
-            progress_cb(i, len(dois) + (1 if plain_refs else 0),
-                        f"Fetching DOI {i+1}/{len(dois)}: {doi[:40]}…")
+            progress_cb(i, total_steps,
+                        f"📡 Fetching DOI {i+1}/{len(dois)}: {doi[:45]}…")
+        meta = {}
         try:
             meta = fetch_doi_metadata(doi)
-            if "error" not in meta:
-                # Use CrossRef metadata directly — summarise context from raw_text if possible
-                # Find the surrounding text for this DOI
-                import re
-                context = ""
-                idx = raw_text.find(doi)
-                if idx > 0:
-                    context = raw_text[max(0, idx-300):idx+300]
-                # Build a minimal article dict from CrossRef metadata
-                articles.append({
-                    "title":           meta.get("title",""),
-                    "authors":         meta.get("authors",[]),
-                    "year":            meta.get("year",""),
-                    "journal":         meta.get("journal",""),
-                    "doi":             doi,
-                    "main_objectives": f"Retrieved via CrossRef. Context: {context[:200]}" if context else "Retrieved via CrossRef.",
-                    "methodology":     "",
-                    "major_findings":  [f"See: https://doi.org/{doi}"],
-                    "keywords":        [],
-                    "limitations":     "",
-                    "conclusion":      "",
-                    "_source":         "crossref",
-                })
         except Exception:
-            # If CrossRef fails, store just the DOI
+            meta = {"error": "fetch_failed"}
+
+        if "error" not in meta and meta.get("title"):
+            # AI-enrich with objectives, methodology, findings, keywords
+            if progress_cb:
+                progress_cb(i, total_steps,
+                            f"🤖 AI enriching {i+1}/{len(dois)}: {meta.get('title','')[:40]}…")
+            enriched = _ai_summarise_from_meta(api_key, model, meta) if api_key else {
+                "main_objectives": "", "methodology": "",
+                "major_findings": [], "keywords": [], "limitations": "", "conclusion": ""
+            }
+            articles.append({
+                "title":           meta.get("title",""),
+                "authors":         meta.get("authors",[]),
+                "year":            meta.get("year",""),
+                "journal":         meta.get("journal",""),
+                "doi":             doi,
+                "main_objectives": enriched["main_objectives"],
+                "methodology":     enriched["methodology"],
+                "major_findings":  enriched["major_findings"],
+                "keywords":        enriched["keywords"],
+                "limitations":     enriched["limitations"],
+                "conclusion":      enriched["conclusion"],
+            })
+        else:
+            # CrossRef failed — still store with empty fields for manual editing
             articles.append({
                 "title":           f"Article (DOI: {doi})",
                 "authors":         [],
@@ -1507,48 +1604,63 @@ def fetch_articles_from_dois(api_key: str, model: str, dois: list,
                 "keywords":        [],
                 "limitations":     "",
                 "conclusion":      "",
-                "_source":         "doi_only",
             })
 
     # ── Process plain references via AI ──────────────────────────────
     if plain_refs and api_key:
         if progress_cb:
-            n_dois = len(dois)
-            progress_cb(n_dois, n_dois + 1, f"AI parsing {len(plain_refs)} plain references…")
+            progress_cb(len(dois), total_steps,
+                        f"🤖 AI parsing {len(plain_refs)} plain references…")
+
+        # Batch parse all plain refs in one call for speed
         refs_block = "\n".join(f"{j+1}. {r}" for j,r in enumerate(plain_refs[:50]))
-        sys_prompt = """You are a reference parser. Extract structured data from the reference list.
-Return a JSON array where each element has:
-  "title", "authors" (list of strings), "year", "journal", "doi" (or empty string), "keywords" (list)
-Return ONLY valid JSON array."""
-        user_msg = f"Extract structured data from these references:\n\n{refs_block}"
+        sys_prompt = (
+            "You are an academic reference parser AND research analyst. "
+            "Extract structured data AND generate research summaries from the reference list.\n"
+            "Return a JSON array where each element has:\n"
+            "  \"title\", \"authors\" (list of strings), \"year\", \"journal\", "
+            "\"doi\" (or empty string),\n"
+            "  \"main_objectives\" (2 sentences inferring what the study investigated),\n"
+            "  \"methodology\" (1-2 sentences on likely research design),\n"
+            "  \"major_findings\" (list of 3 plausible key findings),\n"
+            "  \"keywords\" (list of 5 keywords)\n"
+            "Return ONLY valid JSON array. No markdown."
+        )
+        user_msg = f"Parse and enrich these references:\n\n{refs_block}"
         try:
-            resp = call_groq(api_key, model, sys_prompt, user_msg, max_tokens=3000, stream=False)
-            raw = resp.json()["choices"][0]["message"]["content"].strip()
-            import re as _re2
-            raw = _re2.sub(r"^```(?:json)?\s*","",raw)
-            raw = _re2.sub(r"\s*```$","",raw)
-            import json as _json2
-            parsed_refs = _json2.loads(raw)
+            resp = call_groq(api_key, model, sys_prompt, user_msg,
+                             max_tokens=4096, stream=False)
+            raw  = resp.json()["choices"][0]["message"]["content"].strip()
+            raw  = re.sub(r"^```(?:json)?\s*","",raw)
+            raw  = re.sub(r"\s*```$","",raw)
+            parsed_refs = json.loads(raw)
+            existing_dois = {a.get("doi","") for a in articles}
             for ref in parsed_refs:
                 if not ref.get("title"):
                     continue
-                # Check if we already have this via DOI
-                existing_dois = {a.get("doi","") for a in articles}
                 if ref.get("doi","") and ref["doi"] in existing_dois:
                     continue
+                findings = ref.get("major_findings",[])
+                if not isinstance(findings, list):
+                    findings = [str(findings)] if findings else []
+                authors = ref.get("authors",[])
+                if not isinstance(authors, list):
+                    authors = [str(authors)] if authors else []
+                keywords = ref.get("keywords",[])
+                if not isinstance(keywords, list):
+                    keywords = [str(keywords)] if keywords else []
                 articles.append({
                     "title":           ref.get("title",""),
-                    "authors":         ref.get("authors",[]) if isinstance(ref.get("authors",[]),list) else [str(ref.get("authors",""))],
+                    "authors":         authors,
                     "year":            str(ref.get("year","")),
                     "journal":         ref.get("journal",""),
                     "doi":             ref.get("doi",""),
-                    "main_objectives": "",
-                    "methodology":     "",
-                    "major_findings":  [],
-                    "keywords":        ref.get("keywords",[]) if isinstance(ref.get("keywords",[]),list) else [],
+                    "main_objectives": ref.get("main_objectives",""),
+                    "methodology":     ref.get("methodology",""),
+                    "major_findings":  findings,
+                    "keywords":        keywords,
                     "limitations":     "",
                     "conclusion":      "",
-                    "_source":         "plain_ref",
                 })
         except Exception:
             pass
@@ -2441,18 +2553,63 @@ KEYWORDS: {", ".join(s.get("keywords",[]))}
                     "Upload Excel", type=["xlsx"], key="lr_excel_import",
                     label_visibility="collapsed"
                 )
+                enrich_toggle = st.checkbox(
+                    "🤖 AI-enrich missing fields (objectives, methodology, findings) using Groq",
+                    value=True, key="excel_enrich_toggle",
+                    help="For articles imported from DOI-only sources, AI fills in objectives, "
+                         "methodology and findings. Takes ~2s per article."
+                )
                 if excel_upload:
                     if st.button("📥 Import from Excel", type="primary", key="import_excel_btn",
                                  use_container_width=True):
                         with st.spinner("Parsing Excel…"):
                             imported = parse_excel_to_articles(excel_upload.read())
                         if imported:
+                            # Count how many need enrichment
+                            needs_enrichment = [a for a in imported if a.get("_needs_enrichment")]
                             existing = st.session_state.get("lit_review_articles", [])
                             existing_titles = {a.get("title","").lower() for a in existing}
                             new_arts = [a for a in imported
                                         if a.get("title","").lower() not in existing_titles]
+
+                            if enrich_toggle and needs_enrichment and groq_key:
+                                prog = st.progress(0, f"AI enriching {len(needs_enrichment)} articles…")
+                                enriched_count = 0
+                                for idx_e, art in enumerate(new_arts):
+                                    if art.get("_needs_enrichment") and art.get("title"):
+                                        prog.progress(
+                                            (idx_e+1)/len(new_arts),
+                                            f"🤖 Enriching {idx_e+1}/{len(new_arts)}: {art['title'][:40]}…"
+                                        )
+                                        enriched = _ai_summarise_from_meta(
+                                            groq_key, model_choice, {
+                                                "title":   art.get("title",""),
+                                                "authors": art.get("authors",[]),
+                                                "year":    art.get("year",""),
+                                                "journal": art.get("journal",""),
+                                                "doi":     art.get("doi",""),
+                                            }
+                                        )
+                                        if not art.get("main_objectives"):
+                                            art["main_objectives"] = enriched["main_objectives"]
+                                        if not art.get("methodology"):
+                                            art["methodology"] = enriched["methodology"]
+                                        if not art.get("major_findings"):
+                                            art["major_findings"] = enriched["major_findings"]
+                                        if not art.get("keywords"):
+                                            art["keywords"] = enriched["keywords"]
+                                        if not art.get("limitations"):
+                                            art["limitations"] = enriched["limitations"]
+                                        art.pop("_needs_enrichment", None)
+                                        enriched_count += 1
+                                prog.progress(1.0, f"✅ Enriched {enriched_count} articles")
+                            else:
+                                for art in new_arts:
+                                    art.pop("_needs_enrichment", None)
+
                             st.session_state.lit_review_articles = existing + new_arts
-                            st.success(f"✅ Imported {len(new_arts)} article(s) from Excel.")
+                            st.success(f"✅ Imported {len(new_arts)} article(s) from Excel."
+                                       + (f" AI-enriched {len(needs_enrichment)}." if enrich_toggle and needs_enrichment else ""))
                             st.rerun()
                         else:
                             st.error("❌ Could not parse. Make sure it's a Zodha Literature Review export.")
