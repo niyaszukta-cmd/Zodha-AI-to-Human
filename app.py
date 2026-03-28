@@ -2566,8 +2566,9 @@ style="background:#1a2e1b;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
             st.info("📄 Paste text above to begin.")
         else:
             chunks = chunk_text(input_text)
+            _model_label = _active_model_dict.get(model_choice, model_choice).split(" · ")[0]
             st.markdown(
-                f'<div class="wc-badge">⚡ {len(chunks)} chunk(s) · {GROQ_MODELS[model_choice].split(" · ")[0]} · {intensity}</div>',
+                f'<div class="wc-badge">⚡ {len(chunks)} chunk(s) · {_model_label} · {intensity}</div>',
                 unsafe_allow_html=True)
 
     if run_btn:
