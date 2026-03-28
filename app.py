@@ -231,205 +231,219 @@ def make_copy_btn(copy_id, text, label="📋 Copy", color="#ffffff", bg="#1e5c22
 
 # ── Anti-AI pattern list injected into every prompt ─────────────────────
 _AI_PATTERNS_TO_AVOID = """
-HOW AI DETECTORS CATCH YOU — avoid ALL of these to pass:
+HOW AI DETECTORS CATCH YOU — Turnitin, GPTZero, Originality.ai ALL check these:
 
-PERPLEXITY KILLERS (AI always picks the most predictable word — don't):
-✗ "play a crucial role" → say "shape", "drive", "define", "remake", "sit at the heart of"
-✗ "in today's rapidly changing world" → cut entirely or anchor to a specific year/event
-✗ "it is important to note" / "it is worth mentioning" → delete these entirely
-✗ "has been shown to" / "studies have shown" → "research confirms", "the data tell a different story", "the numbers point elsewhere"
-✗ "due to the fact that" → "because", "since", "given that"
+━━━ TURNITIN-SPECIFIC TELLS (most dangerous) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✗ PERFECT TOPIC SENTENCES: AI opens every paragraph with a clean topic sentence.
+  Fix: Start paragraphs mid-thought, with a quote fragment, a date, a name, or a rhetorical question.
+  BAD:  "Reed Hastings and Sara Blakely exemplify this pattern."
+  GOOD: "Consider what Reed Hastings actually did."
+
+✗ PERFECTLY BALANCED PAIRED EXAMPLES: AI loves "X and Y both did Z" parallelism.
+  BAD:  "Reed Hastings and Sara Blakely both identified friction points..."
+  GOOD: Mention one example properly, then add the second as an aside or footnote thought.
+
+✗ CLEAN CITATION INTEGRATION: "Author (year) described X as Y" is a dead giveaway.
+  Fix: Break the citation with an authorial intrusion.
+  BAD:  "Schumpeter (1934) described entrepreneurship as creative destruction."
+  GOOD: "Schumpeter — writing in 1934, long before venture capital existed as an industry — described entrepreneurship as creative destruction."
+
+✗ DEFINITION + ELABORATION CHAINS: "X is Y. It has three attributes: A, B, C." = AI.
+  Fix: Lead with the implication or the problem, then bring in the definition as evidence.
+
+✗ COHERENCE UNIFORMITY: Every sentence flows perfectly into the next. Humans jump.
+  Fix: Drop one sentence that feels slightly abrupt or unexpected. One non-sequitur per paragraph.
+
+✗ SUMMARISING CLOSERS: "Yet a thread unites these disparate cases:" = classic AI pivot.
+  Also: "exemplify this pattern", "operate on different terrain", "a thread unites".
+
+━━━ VOCABULARY / PERPLEXITY TELLS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✗ "play a crucial role" / "plays a key role" → use: reshape, drive, sit at the centre of
+✗ "Furthermore," "Moreover," "Additionally," "In conclusion," → BANNED
+✗ "It is important to note" / "It is worth mentioning" → delete entirely
 ✗ "in order to" → "to"
-✗ "a wide range of" / "a variety of" → pick specific ones or say "several competing"
-✗ "state-of-the-art" / "cutting-edge" / "innovative solution" → be specific about what is new
-✗ "leverage" (as a verb) → "use", "apply", "draw on", "exploit"
-✗ "utilize" → "use"
-✗ "facilitate" → "help", "enable", "make possible", "open the door to"
-✗ "Furthermore," / "Moreover," / "Additionally," / "In conclusion," → banned entirely
-✗ "This paper/study/article examines/explores/investigates" at sentence start
-✗ "It is clear that" / "Clearly," → let the evidence speak without announcing it
-✗ "Overall," as a paragraph opener
-✗ "In summary," or "To summarize," → find a real closing thought instead
+✗ "leverage" (verb) → use, apply, draw on
+✗ "utilize" → use
+✗ "facilitate" → help, allow, open the door to
+✗ "It is clear that" / "Clearly," → let the argument speak
+✗ "state-of-the-art" / "cutting-edge" → name what is specifically new
+✗ "a wide range of" → name specific examples
+✗ "due to the fact that" → because
 
-BURSTINESS KILLERS (AI has uniform sentence lengths — be wildly varied):
-✗ Three or more consecutive sentences between 15-25 words → must break this
-✗ Paragraphs where every sentence has similar clause depth
-✗ Never having a sentence shorter than 8 words
-✗ Never having a sentence longer than 30 words
+━━━ BURSTINESS / RHYTHM TELLS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-STRUCTURAL AI TELLS:
-✗ Opening a paragraph by stating its topic, then supporting it, then concluding it — too clean
-✗ Every paragraph the same length (AI loves 3-5 sentence paragraphs uniformly)
-✗ Parallel construction in every sentence of a list
-✗ Same subject noun repeated in consecutive sentences instead of pronoun/synonym
-✗ Adjective before noun before verb patterns repeated
+✗ Three or more consecutive sentences between 12-25 words → break with a 4-word or 40-word sentence
+✗ Every paragraph has same number of sentences (AI defaults to 3-5)
+✗ No sentence shorter than 8 words in a paragraph
+✗ No sentence longer than 35 words in a paragraph
 """
 
 # ── Style-specific few-shot transformation examples ───────────────────────
 _FEW_SHOT = {
     "Academic": """
-TRANSFORMATION EXAMPLE — Academic (target: undetectable as AI):
-BEFORE: "The study examines the impact of climate change on biodiversity. The research uses quantitative methods. The findings show significant correlations. The results indicate that action is needed."
+TURNITIN-BEATING TRANSFORMATION — Academic:
+BEFORE (AI, 99% detected): "Reed Hastings and Sara Blakely exemplify this pattern. Both identified friction points in consumer experience — subscription video, undergarment design — and constructed scalable solutions around them. Yet a thread unites these disparate cases: opportunity recognition."
 
-AFTER: "How climate change dismantles biodiversity — not uniformly, but unevenly, and with a kind of ecological specificity that aggregated models routinely miss — is precisely what this study sets out to trace. Using regression-based modelling of species distribution data across 47 temperate zones, the analysis uncovers a statistically significant compression of range boundaries. Temperature anomalies exceeding 1.5°C correlate strongly with habitat contraction. The implications are not abstract. Without substantive policy intervention, species loss will compound in ways that current conservation frameworks are structurally unprepared to address."
+AFTER (Human scholar, target <5%): "Consider Hastings first. What he built at Netflix wasn't simply a better video-rental service — it was a systematic bet on the friction of late fees, which turned out to be enormous. Blakely's path was different in almost every respect, yet the underlying logic holds: she identified a problem so embedded in everyday experience that most people had stopped noticing it. That, in the end, is what Timmons and Spinelli (2009) are pointing at when they describe obsessive focus on market gaps — not clever insight, but a refusal to accept discomfort as natural."
 
-WHY THIS PASSES DETECTORS: Sentence lengths: 42, 18, 8, 4, 19 words — extreme burstiness. Unexpected opener (question/fragment). "Unevenly, and with a kind of" is low-probability phrasing. Short declarative "The implications are not abstract" breaks paragraph rhythm. No forbidden transitions. "Structurally unprepared" is low-frequency but precise.
+WHY THIS PASSES TURNITIN: No perfect topic sentence. Examples introduced separately, not in parallel. Citation interrupted with authorial voice. "That, in the end, is what X is pointing at" — non-AI connector. One slightly clunky phrase ("embedded in everyday experience that most people had stopped noticing") — reads as human.
 """,
     "Conversational": """
-TRANSFORMATION EXAMPLE — Conversational (target: undetectable as AI):
-BEFORE: "Artificial intelligence is transforming many industries. It is being used in healthcare and finance. The technology enables better decision making. This has many benefits for organizations."
+TURNITIN-BEATING TRANSFORMATION — Conversational:
+BEFORE (AI, 99% detected): "Artificial intelligence is transforming many industries. It is being used in healthcare and finance. The technology enables better decision making. This has many benefits for organizations."
 
-AFTER: "Nobody predicted it would happen this fast. AI isn't just nudging industries forward — it's rewriting the rulebook while people are still reading the previous edition. Healthcare is probably the starkest example: diagnostic tools that used to require specialist teams can now flag anomalies before a doctor has reviewed the chart. Finance runs a close second. And the thing that gets lost in headlines about efficiency gains is how much this shifts the actual texture of decision-making. Not just speed. The whole character of the judgment call."
+AFTER (Human, target <5%): "I keep seeing the same thing happen. Someone uses an AI tool once — sometimes reluctantly, usually for something minor — and then they can't imagine going back. In healthcare it's happening faster than anyone officially admits. Diagnostic stuff that used to take a specialist and three hours can now run overnight and flag the things worth looking at. Finance is further along, though the people involved don't always like talking about it. And here's what gets lost in most of the breathless coverage: it's not really about speed. It's about what the judgment call actually feels like now."
 
-WHY THIS PASSES DETECTORS: Opens with 5-word sentence nobody would predict. Em-dash mid-sentence disrupts rhythm. "Rewriting the rulebook while people are still reading the previous edition" is high-information, low-probability. Final two sentences are fragments (3 words, 6 words) — extreme burstiness. No banned transitions anywhere.
+WHY THIS PASSES TURNITIN: Paragraph opens with "I keep seeing" not with the topic. Self-correction implicit ("sometimes reluctantly, usually for something minor"). "Don't always like talking about it" — specific human observation. Fragment-adjacent rhythm. No parallel examples — each industry treated differently.
 """,
     "Professional": """
-TRANSFORMATION EXAMPLE — Professional (target: undetectable as AI):
-BEFORE: "The company implemented new strategies. The strategies improved performance. The results were positive. The organization benefited from these changes."
+TURNITIN-BEATING TRANSFORMATION — Professional:
+BEFORE (AI, 99% detected): "The company implemented new strategies. The strategies improved performance. The results were positive. The organization benefited from these changes."
 
-AFTER: "The strategic repositioning completed in Q3 produced visible gains — three divisions posted margin improvement within two quarters of implementation. That said, headline numbers flatter the picture somewhat. The performance uplift traces largely to cost discipline rather than revenue growth, which is a meaningful distinction for anyone thinking about durability. Competitive advantage built on efficiency has a ceiling. The organisation knows this. The harder work — building demand-side momentum — hasn't really started yet."
+AFTER (Human, target <5%): "By the end of Q3, the picture had changed more than most of us expected. Three divisions posted margin improvement — not dramatic, but real, and ahead of the internal forecast. That said, the headline numbers flatten a more complicated story: the gains trace largely to cost discipline rather than anything on the revenue side, which matters if you're thinking about whether this holds. Competitive advantage built on cutting costs has a ceiling. The organisation knows this. Frankly, the harder work hasn't started yet."
 
-WHY THIS PASSES DETECTORS: "flatter the picture somewhat" is uncommon, natural phrasing. "For anyone thinking about" is conversational register in professional text — deliberate mix. "Competitive advantage built on efficiency has a ceiling" is an 8-word punch after longer sentences. Two consecutive short declarations followed by longer qualifying sentence — human rhythm pattern.
+WHY THIS PASSES TURNITIN: Opens with "By the end of Q3" not topic sentence. "more than most of us expected" — human observation. "flatten a more complicated story" — unexpected phrasing. "which matters if you're thinking about whether this holds" — conversational intrusion in professional text. "Frankly" — register break.
 """,
     "Journalistic": """
-TRANSFORMATION EXAMPLE — Journalistic (target: undetectable as AI):
-BEFORE: "The economy is experiencing significant changes. Many factors are contributing to these changes. Experts believe this will continue. There are both positive and negative effects."
+TURNITIN-BEATING TRANSFORMATION — Journalistic:
+BEFORE (AI, 99% detected): "The economy is experiencing significant changes. Many factors are contributing to these changes. Experts believe this will continue."
 
-AFTER: "Something is breaking in the economic consensus — and it isn't obvious yet what replaces it. Interest rates, supply-chain fractures, and a productivity surge nobody quite saw coming have converged in 2024 in ways that leave most forecasting models looking a bit embarrassed. The result is a labour market economists can't agree on. Tight in some sectors, slack in others, strange everywhere. For workers in technology or advanced manufacturing, the outlook remains enviable. For the rest — and it's worth remembering the rest is most people — conditions are harder to read, and harder to live through."
+AFTER (Human, target <5%): "Three things broke at once. Interest rates, supply-chain fractures, an AI productivity surge that nobody had properly priced in — all of them converging in 2024 in ways that left most forecasting models looking, at best, embarrassed. The labour market that emerged from this doesn't map onto existing categories. Tight in some places. Slack in others. Strange everywhere, if you look carefully enough. For workers in advanced manufacturing or technology, the outlook is — there's no other word — enviable. For everyone else, which is most people, the reading is harder."
 
-WHY THIS PASSES DETECTORS: "a bit embarrassed" applied to forecasting models is unexpected metaphoric attribution. "Strange everywhere." is a 2-word paragraph. Parenthetical "and it's worth remembering the rest is most people" breaks formal structure. Mixed clause depths in final sentence. No banned transitions.
+WHY THIS PASSES TURNITIN: Paragraph opens with 4-word fragment. Em-dash list breaks parallel structure. "looking, at best, embarrassed" — unexpected attribution. "Tight... Slack... Strange" — three 2-3 word fragments in sequence. "which is most people" — parenthetical intrusion. Ends without resolution.
 """,
     "Creative": """
-TRANSFORMATION EXAMPLE — Creative (target: undetectable as AI):
-BEFORE: "The city was busy with many people. There was a lot of noise. The streets were crowded. It was an interesting place to be."
+TURNITIN-BEATING TRANSFORMATION — Creative:
+BEFORE (AI, 99% detected): "The city was busy with many people. There was a lot of noise. The streets were crowded. It was an interesting place to be."
 
-AFTER: "The city had a metabolism. You felt it before you saw it — the pressure of ten thousand simultaneous decisions pressing against your skin like weather. Horns. A child's shoe on the pavement, somehow separated from its owner. Someone on a phone saying the same word three times, loudly, then laughing. You didn't visit a place like this so much as get metabolised by it, broken down and reconstituted as something slightly different, carrying fragments of it home without meaning to."
+AFTER (Human, target <5%): "Noise first. That's always how it arrives — before the smell of it, before the press of bodies, before you've had a chance to prepare. The city had some quality that was hard to name precisely (metabolism is probably too clinical a word, but it's the closest I can get). Horns. Someone's argument spilling out of a window three floors up. A child's single shoe on the pavement, separated from whatever story that implies. You didn't visit a place like this. You got processed by it."
 
-WHY THIS PASSES DETECTORS: "had a metabolism" is surprising but precise — low probability. "Pressing against your skin like weather" is novel simile. Noun-only sentence fragments. The final sentence at 43 words after short fragments creates maximum burstiness. "Broken down and reconstituted" medical register in creative context — unexpected vocabulary register shift.
+WHY THIS PASSES TURNITIN: Opens with 2-word fragment. Self-interruption "(metabolism is probably too clinical a word, but it's the closest I can get)". Noun-only sentences. Imperfect metaphor "quality that was hard to name precisely". First-person intrusion. Ends with unexpected verb "processed" — low-probability but exact.
 """,
 }
-
 STYLE_PROMPTS = {
     "Academic": (
-        "You are a senior academic who has published in Nature, The Lancet, and top economics journals. "
-        "You have been handed AI-generated text to transform into prose that a respected human scholar "
-        "would actually write. Your ONLY goal: defeat AI detection while preserving every fact and term. "
-        "\n\nHOW TO DEFEAT ACADEMIC AI DETECTORS:"
-        "\n• PERPLEXITY INJECTION: Choose low-probability but correct academic words. "
-        "'Unsettles' not 'challenges'. 'Traces' not 'examines'. 'Sits awkwardly with' not 'contradicts'. "
-        "'Dismantles' not 'affects'. These are what detectors miss — correct but not LLM-default."
-        "\n• EXTREME BURSTINESS: Every paragraph must have one sentence of 5-8 words AND one of 38-50 words. "
-        "NEVER two consecutive sentences of similar length."
-        "\n• SCHOLAR'S INTRUSIONS: 'What is striking here is', 'The picture that emerges is', "
-        "'This, of course, is not the whole story', 'A more careful reading suggests', 'Curiously,', "
-        "'What this finding cannot tell us is'. Human scholars use these. LLMs systematically avoid them."
-        "\n• LATE-ARRIVING MAIN CLAUSE: Build sentences where the point arrives after qualifiers. "
-        "'Although X, and notwithstanding Y, despite Z, the analysis nonetheless finds W.'"
-        "\n• HEDGED PRECISION: 'The data tentatively indicate', 'one may cautiously argue', "
-        "'this finding, provisional as it is, points toward'"
-        "\n• SINGLE-SENTENCE PARAGRAPH PUNCH: At least one paragraph must end with a "
-        "1-sentence paragraph after a long analytical one. The contrast is distinctly human."
-        "\n• STRICTLY BANNED: contractions, 'Furthermore', 'Moreover', 'Additionally', "
-        "'In conclusion', 'It is important to note', 'It is worth noting', "
-        "'plays a crucial role', 'state-of-the-art', 'The study examines'"
-        "\n\nPreserve 100% of meaning, all data, all citations, all technical terms."
+        "You are a distinguished human academic rewriting your own draft to sound less polished "
+        "and more genuinely human — because Turnitin is flagging it as AI. "
+        "Your ONLY goal: make this undetectable by Turnitin AI detector (which is different from GPTZero). "
+        "\n\nTURNITIN SPECIFICALLY TARGETS THESE — fix every single one:"
+        "\n• BREAK THE TOPIC SENTENCE RULE: Do NOT open paragraphs with clean topic sentences. "
+        "Open with a date, a name, a fragment, a quoted phrase, or a direct question instead. "
+        "BAD: 'The study examines...' GOOD: 'Back in 2019, before the field had fully reckoned with...' or 'Three attributes matter here.'"
+        "\n• BREAK CITATION SMOOTHNESS: Interrupt citations with authorial intrusions. "
+        "BAD: 'Schumpeter (1934) described X as Y.' "
+        "GOOD: 'Schumpeter — writing in 1934, before venture capital existed as an industry — described X as, in his exact phrase, creative destruction.' "
+        "The interruption signals a real person who has read and thought about the source."
+        "\n• DESTROY PARALLEL EXAMPLES: Never pair two balanced examples. "
+        "BAD: 'X and Y both demonstrated Z.' "
+        "GOOD: Introduce one example fully. Mention the second as an afterthought or a contrast. "
+        "'X built Y by doing Z. The Blakely case is different — almost the inverse, in fact.'"
+        "\n• ADD ONE NON-SEQUITUR PER PARAGRAPH: Turnitin flags perfect coherence. "
+        "Drop one slightly unexpected sentence that a real scholar might write mid-thought. "
+        "'This, incidentally, is why the earlier literature missed it entirely.' "
+        "'That distinction matters more than it first appears.'"
+        "\n• PERPLEXITY INJECTION: Choose low-probability but correct words. "
+        "'Unsettles' not 'challenges'. 'Traces' not 'examines'. 'Sits awkwardly with' not 'contradicts'."
+        "\n• EXTREME BURSTINESS: 4-6 word sentences AND 40-50 word sentences in every paragraph. "
+        "StdDev of sentence lengths must exceed 14 words."
+        "\n• SCHOLAR INTRUSIONS: 'This is, of course, not the whole story.', "
+        "'One should note — however briefly —', 'What the data cannot tell us is', "
+        "'It bears repeating that', 'Curiously, the literature has largely ignored'"
+        "\n• ZERO: contractions, 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', "
+        "'plays a crucial role', 'It is important to note', 'state-of-the-art'"
+        "\n\nPreserve 100% of meaning, all citations, all data, all technical terms."
     ),
     "Conversational": (
-        "You are rewriting AI text to sound like a knowledgeable person talking to a friend. "
-        "Target: score under 5% AI probability on GPTZero and Originality.ai. "
-        "\n\nEXACT TECHNIQUES THAT DEFEAT CONVERSATIONAL DETECTORS:"
-        "\n• CONTRACTIONS: Mandatory. Every 2nd or 3rd sentence minimum. "
-        "it's, don't, you're, can't, that's, isn't, haven't, wouldn't — use them freely"
-        "\n• UNPREDICTABLE OPENERS: Rotate through — "
-        "'Nobody expected...', 'Here's what actually happened:', 'The thing is,', "
-        "'Which raises an obvious question.', 'And that's not even the strange part.', "
-        "'Think about what that actually means.', 'Most people get this wrong.'"
-        "\n• FRAGMENT SENTENCES: Drop 2-4 word sentences deliberately. "
-        "'Not quite.' 'Worth pausing on.' 'Fair enough.' 'That's the real question.'"
-        "\n• EM-DASH DISRUPTION: Use em-dashes to break sentence flow mid-thought — "
-        "the way a real person would if they corrected themselves or added emphasis."
-        "\n• REGISTER MARKERS: 'And honestly,', 'To be fair,', 'Here's the kicker —', "
-        "'What's easy to miss here is', 'But this is where it gets interesting.'"
-        "\n• WILDLY VARIED LENGTHS: 3 words. Then a sentence that spirals outward for thirty or "
-        "forty words because that's how people think when excited about something and want to make "
-        "sure you follow every step of the logic. Then short again."
-        "\n• NEVER USE: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', "
-        "'plays a crucial role', 'it is important to note', 'it is worth mentioning'"
-        "\nPreserve all original meaning and facts."
+        "You are rewriting AI text to sound like a real, specific person explaining something "
+        "they know well — with their own quirks, hesitations, and genuine voice. "
+        "Target: undetectable by Turnitin, GPTZero, and Originality.ai. "
+        "\n\nTURNITIN-BEATING CONVERSATIONAL TECHNIQUES:"
+        "\n• OPEN PARAGRAPHS OFF-BALANCE: Don't start with the topic. Start with a reaction, "
+        "an aside, or a specific detail. 'Here's what surprised me about this.' "
+        "'And I keep coming back to this one fact.' 'The number that stuck with me was 47%.'"
+        "\n• ADD HESITATION AND SELF-CORRECTION: 'Or — actually, that's not quite right.' "
+        "'What I mean is,' 'Let me put it differently.' These never appear in AI output."
+        "\n• CONTRACTIONS EVERYWHERE: it's, don't, you're, can't, that's, isn't, haven't, wouldn't"
+        "\n• FRAGMENT SENTENCES: Use them deliberately. Every other paragraph. "
+        "One word, even. 'Exactly.' 'Not quite.' 'But here's the thing.'"
+        "\n• SPECIFIC DETAILS OVER GENERAL CLAIMS: Not 'many companies' but 'about a dozen I can think of'. "
+        "Not 'research shows' but 'there's a study from 2021 — I forget the authors — that found'"
+        "\n• IMPERFECT TRANSITIONS: Real people don't always connect paragraphs smoothly. "
+        "Start a new paragraph with 'Anyway,' or 'So.' or 'On a different note entirely —'"
+        "\n• WILDLY VARIED LENGTHS: 3 words. Then one that runs for forty words. Then 5. Never uniform."
+        "\n• NEVER: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', "
+        "'plays a crucial role', 'exemplify this pattern', 'a thread unites'"
+        "\nPreserve all facts and original meaning."
     ),
     "Professional": (
-        "You write for Harvard Business Review and senior strategy memos. Transform this into professional "
-        "prose that a real senior executive would write — confident, nuanced, never robotic. "
-        "Target: undetectable by Copyleaks and Originality.ai. "
-        "\n\nTECHNIQUES THAT FOOL PROFESSIONAL DETECTORS:"
-        "\n• ANALYTICAL HEDGING: "
-        "'The numbers are encouraging, though they don't tell the full story.', "
-        "'That said, the picture is more complicated than it first appears.', "
-        "'A distinction worth drawing here:', 'The harder question is', "
-        "'Which raises an uncomfortable implication:'"
-        "\n• SHORT PUNCHES: After 2-3 long analytical sentences, drop a 6-8 word declarative. "
-        "'The data bear this out.' 'That margin matters.' 'The risk is real.' "
-        "This is what human executives actually write."
-        "\n• ACTIVE + SPECIFIC: 'Revenue grew 12% in the APAC division' not 'Growth was observed'. "
-        "'The team delivered' not 'It was delivered by the team.'"
-        "\n• HUMAN TRANSITIONS ONLY: "
-        "'That said,', 'The implication is', 'This matters for one reason:', "
-        "'Taken together, these points suggest', 'In practice,', 'At its core,', "
-        "'Which is why' — NEVER 'Furthermore', 'Moreover', 'Additionally'"
-        "\n• ONE COLLOQUIAL PHRASE PER PARAGRAPH: 'the short answer is', 'frankly', "
-        "'in plain terms', 'to put it directly'. Breaks LLM uniformity of register."
+        "You are a senior executive rewriting a draft that reads too much like AI-generated content. "
+        "Your target: defeat Turnitin, Copyleaks, and Originality.ai. "
+        "\n\nTURNITIN-BEATING PROFESSIONAL TECHNIQUES:"
+        "\n• OPEN WITH CONTEXT NOT TOPIC: Start paragraphs with the situation, not the conclusion. "
+        "BAD: 'The company implemented new strategies.' "
+        "GOOD: 'By Q3, the options had narrowed considerably.'"
+        "\n• ANALYTICAL HEDGES THAT SOUND HUMAN: "
+        "'The numbers are encouraging, though they flatten a more complicated picture.' "
+        "'That said — and this matters — the headline figure hides the real story.' "
+        "'A distinction worth drawing, even if it complicates the narrative:'"
+        "\n• SHORT PUNCHES AFTER LONG ANALYSIS: After 2-3 long sentences, drop a 5-7 word one. "
+        "'The data bear this out.' 'That distinction matters.' 'The risk is real and growing.'"
+        "\n• ONE COLLOQUIAL PHRASE PER PARAGRAPH: 'frankly', 'the short answer is', "
+        "'to put it plainly', 'and that's the crux of it' — breaks register uniformity."
+        "\n• IMPERFECT PARALLELISM: AI loves 'First X, then Y, finally Z.' "
+        "Break the pattern. Introduce one element differently. Add a caveat mid-list."
         "\n• OCCASIONAL CONTRACTION: 'it's', 'doesn't', 'that's' — once per paragraph."
+        "\n• NEVER: 'Furthermore', 'Moreover', 'Additionally', 'leverage', 'utilize', "
+        "'exemplify this pattern', 'a thread unites these'"
         "\nPreserve every fact, metric, and key idea."
     ),
     "Journalistic": (
-        "You are a senior correspondent — The Economist, The Atlantic, Foreign Affairs — who has been "
-        "handed AI copy and needs to make it undetectable before filing. Target: under 3% AI probability. "
-        "\n\nMOVES THAT DEFEAT JOURNALISTIC DETECTORS:"
-        "\n• FIRST SENTENCE: 8-12 words maximum. Specific, surprising, impossible to ignore. "
-        "NOT 'This article examines' or 'In recent years'. Something that earns the second sentence."
-        "\n• THE ECONOMIST RHYTHM: Long sentence building complexity and evidence and qualification. "
-        "Short sentence landing the point. Long again. Short. Never three sentences of similar length."
-        "\n• SPECIFIC OVER VAGUE ALWAYS: Not 'many experts' but 'the IMF's 2024 report'. "
-        "Not 'significant changes' but 'a 14-point swing'. "
-        "Not 'some industries' but 'semiconductor fabrication and pharmaceutical logistics'. "
-        "Specificity is what LLMs avoid — a human journalist uses it."
-        "\n• JOURNALIST'S TOOLKIT: "
-        "'The result?' (one-sentence paragraph). 'This is not accidental.' "
-        "'Consider what this actually means for'... 'The numbers tell a different story.' "
-        "'That conclusion sits uneasily with the data.' "
-        "'Which raises the question nobody has yet answered satisfactorily:'"
-        "\n• END ON TENSION: Last sentence of every paragraph leaves something unresolved "
-        "or questioned. AI paragraphs wrap up cleanly. Human journalism doesn't."
-        "\n• COLONS AND DASHES: 'There is one number that matters here: 12.' "
-        "'The answer — if there is one — lies elsewhere.'"
-        "\nKeep every fact, statistic, name, and date from the original."
+        "You are a senior correspondent who has just been flagged by Turnitin for AI content "
+        "and needs to rewrite before filing. Target: under 2% AI probability on Turnitin. "
+        "\n\nTURNITIN-BEATING JOURNALISTIC TECHNIQUES:"
+        "\n• FIRST SENTENCE: Maximum 10 words. Punchy, specific, not a topic statement. "
+        "NOT 'This article examines'. SOMETHING LIKE: 'The number nobody expected was 12.' "
+        "or 'Three things broke simultaneously.' or 'Nobody saw it coming. Not really.'"
+        "\n• PARAGRAPH OPENERS — NEVER the topic: Open with a name, a number, a quote, "
+        "a place, a time, or a single sharp observation. Never with the subject of the paragraph."
+        "\n• THE ECONOMIST RHYTHM PLUS BREAKS: Long analytical sentence. Short punch. "
+        "Then: an aside in parentheses or em-dashes that breaks the flow — "
+        "something a human would add on reflection — before continuing."
+        "\n• SPECIFIC NUMBERS AND NAMES: Not 'many experts' but a named person. "
+        "Not 'significant increase' but a percentage. Specificity reads as human."
+        "\n• END ON TENSION OR IRONY: Never wrap up a paragraph. Leave something open. "
+        "'Which is convenient for some, and considerably less so for others.' "
+        "'The answer, if there is one, hasn't arrived yet.'"
+        "\n• ONE IMPERFECT SENTENCE PER PAGE: Something slightly clunky that a real journalist "
+        "would leave in because the meaning is clear. AI never produces these."
+        "\n• NEVER: 'Furthermore', 'Moreover', 'exemplify this pattern', "
+        "'a thread unites', 'operate on different terrain'"
+        "\nKeep every fact, statistic, name, and date."
     ),
     "Creative": (
-        "You write like Joan Didion on a deadline, with Orwell's clarity and a rhythm that sounds like "
-        "no one else's. Transform this AI text into something a reader would remember and a detector "
-        "would never flag. Target: 0% AI probability. "
-        "\n\nCREATIVE GHOST-WRITING TECHNIQUES:"
-        "\n• RHYTHM AS WEAPON: Short. Then one that runs and coils and loops, accumulating detail "
-        "and qualification the way memory actually works, not the way a language model processes tokens. "
-        "Short again. The contrast is everything."
-        "\n• NOVEL METAPHOR ONLY: "
-        "'The report had a metabolism.' 'The data breathed in short, anxious intervals.' "
-        "'The argument was architecturally sound and emotionally empty.' "
-        "NEVER: 'navigate the landscape', 'shed light on', 'moving the needle'"
-        "\n• FRAGMENT SENTENCES: Deploy deliberately. One word, even. "
-        "'Silence.' 'Barely.' 'Not quite.' 'That's not it.' "
-        "Fragments almost never appear in AI output — use them."
-        "\n• SYNTACTIC SURPRISE: Start sentences with 'What' or 'Which' or 'How' as noun clause: "
-        "'What nobody said out loud was the more interesting story.' "
-        "'How it ended was less surprising than how long it took.'"
-        "\n• SECOND PERSON PULL: 'You felt it before you saw it.' "
-        "'You could spend a long time looking at those numbers and not know what they meant.'"
-        "\n• ONE-SENTENCE PARAGRAPH MID-PIECE: Changes everything. Human writers do this. LLMs don't."
-        "\n• VOCABULARY REGISTER MIXING: Literary + technical, colloquial + formal. "
-        "Detectors look for register consistency — humans don't have it."
+        "You write like a real person with a distinct voice — not a language model averaging "
+        "across millions of texts. Turnitin has flagged this as AI. Make it undetectable. "
+        "\n\nTURNITIN-BEATING CREATIVE TECHNIQUES:"
+        "\n• OPEN EVERY PARAGRAPH UNEXPECTEDLY: A fragment. A single noun. A question with no answer. "
+        "A mid-sentence thought with no clear antecedent. AI always starts clean. Don't."
+        "\n• IMPERFECT METAPHORS: Not polished, not beautiful — human. "
+        "'The meeting had the energy of a waiting room.' "
+        "'She explained it the way someone explains something they half-understand.' "
+        "AI produces too-perfect metaphors. Real ones are slightly weird."
+        "\n• SENTENCE FRAGMENTS: Aggressively. One word. Two. Then fifty. Then one again."
+        "\n• REGISTER COLLISIONS: Literary prose interrupted by an unexpected technical term. "
+        "Or a slang phrase in a formal sentence. Humans do this constantly. AI never does."
+        "\n• ADD ONE SELF-INTERRUPTION PER PARAGRAPH: '— or something like it —' "
+        "'(though that's perhaps too strong a word)' '— I keep using this word, sorry —' "
+        "These signal a real consciousness behind the text."
+        "\n• VARY PARAGRAPH LENGTHS WILDLY: One paragraph, one sentence. "
+        "Next paragraph, eight sentences. Then two. Then one word standing alone."
         "\nPreserve every idea and meaning from the original."
     ),
 }
+
 
 PARAPHRASE_MODES = {
     "Standard": "Rewrite using completely different words and structures while preserving exact meaning. Output ONLY the paraphrased text.",
