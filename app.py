@@ -26,18 +26,31 @@ except ImportError:
 # CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── Provider model lists ─────────────────────────────────────────────────────
 OPENROUTER_MODELS = {
-    "anthropic/claude-haiku-4-5":     "Claude Haiku 4.5 · Best undetection ⭐",
-    "anthropic/claude-3-5-haiku":     "Claude 3.5 Haiku · Fast & strong",
-    "anthropic/claude-3-haiku":       "Claude 3 Haiku · Ultra cheap",
-    "mistralai/mistral-7b-instruct":  "Mistral 7B · Fastest fallback",
+    "anthropic/claude-haiku-4-5":       "Claude Haiku 4.5 · Best undetection ⭐",
+    "anthropic/claude-3-5-haiku":       "Claude 3.5 Haiku · Fast & strong",
+    "anthropic/claude-3-haiku":         "Claude 3 Haiku · Ultra cheap",
+    "google/gemini-flash-1.5":          "Gemini Flash 1.5 · Free tier available",
+    "meta-llama/llama-3.3-70b-instruct:free": "Llama 3.3 70B · Free ✓",
+    "mistralai/mistral-7b-instruct:free":     "Mistral 7B · Free ✓",
 }
-GROQ_MODELS = OPENROUTER_MODELS
-OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+GROQ_MODELS = {
+    "llama-3.3-70b-versatile": "Llama 3.3 70B · Best quality",
+    "llama-3.1-8b-instant":    "Llama 3.1 8B · Fastest",
+    "mixtral-8x7b-32768":      "Mixtral 8x7B · Long context",
+    "gemma2-9b-it":            "Gemma 2 9B · Balanced",
+}
+
+# Active provider — set by admin ("groq" | "openrouter")
+_DEFAULT_PROVIDER = "openrouter"
 
 # Admin password — set via environment variable or change here
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "zodha2026")
-_OR_ENV_KEY = os.environ.get("OPENROUTER_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+# Both provider keys read from env — admin can also override via Admin panel
+_GROQ_ENV_KEY = os.environ.get("GROQ_API_KEY", "")
+_OR_ENV_KEY   = os.environ.get("OPENROUTER_API_KEY", "")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ZERO-DEPENDENCY READABILITY ENGINE
@@ -713,28 +726,62 @@ def chunk_text(text, max_words=450):
             chunks.append('\n\n'.join(current))
         return chunks if chunks else [text]
 
+def _get_provider(model: str) -> str:
+    """Infer provider from model string or session state."""
+    provider = st.session_state.get("admin_provider", _DEFAULT_PROVIDER)
+    return provider
+
+
 def call_groq(api_key, model, system_prompt, user_prompt, max_tokens=2048, stream=False):
-    """Routes through OpenRouter (Claude Haiku 4.5 default) — same signature, no other changes needed."""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://zodha.streamlit.app",
-        "X-Title": "Zodha Research Writing Pro",
-    }
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt},
-        ],
-        "max_tokens": max_tokens,
-        "temperature": 0.95,
-        "stream": stream,
-    }
-    resp = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers=headers, json=payload, timeout=120, stream=stream
-    )
+    """
+    Dual-provider router — routes to Groq OR OpenRouter depending on
+    admin_provider session state.  All call sites remain unchanged.
+    """
+    provider = _get_provider(model)
+
+    if provider == "groq":
+        # ── Groq endpoint ──────────────────────────────────────────
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.85,
+            "stream": stream,
+        }
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers, json=payload, timeout=120, stream=stream
+        )
+    else:
+        # ── OpenRouter endpoint ────────────────────────────────────
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://zodha.streamlit.app",
+            "X-Title": "Zodha Research Writing Pro",
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.95,   # higher entropy → better AI-detection bypass
+            "stream": stream,
+        }
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers, json=payload, timeout=120, stream=stream
+        )
+
     resp.raise_for_status()
     return resp
 
@@ -2143,6 +2190,7 @@ div[data-testid="stAlert"] p{color:#1a2e1b!important;}
 # ══════════════════════════════════════════════════════════════════════════════
 for k,v in [("output_text",""),("paraphrase_out",""),
              ("grammar_corrected",""),("grammar_issues",[]),
+             ("admin_provider", _DEFAULT_PROVIDER),("platform_or_key",""),
              ("clear_input",False),("clear_para",False),("clear_gram",False),
              ("clear_spss",False),("clear_meth",False),("clear_hyp",False),
              ("clear_jm",False),("clear_cl",False),("clear_rv",False),("clear_cs",False),
@@ -2254,47 +2302,90 @@ if st.session_state.show_admin:
 
     with adm_tab1:
         st.markdown('<div class="card-title">⚙️ API Key & Model Settings</div>', unsafe_allow_html=True)
-        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Configure the Groq API key and default AI model for all users. These settings are hidden from the user portal — only admin can change them.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="color:rgba(255,255,255,0.7);font-size:0.88rem;">Select provider, enter API key(s) and choose model. Settings apply to all users.</p>', unsafe_allow_html=True)
 
-        # ── Groq API Key ──────────────────────────────────────────
-        st.markdown('<p style="color:#ffffff;font-weight:600;margin-top:0.5rem;">🔑 OpenRouter API Key</p>', unsafe_allow_html=True)
-        stored_key = st.session_state.get("platform_groq_key", os.environ.get("OPENROUTER_API_KEY", os.environ.get("GROQ_API_KEY","")))
-        new_key = st.text_input("OpenRouter API Key", value=stored_key, type="password",
-                                 placeholder="sk-or-v1-...", label_visibility="collapsed")
-        if stored_key:
-            masked = stored_key[:8] + "••••••••" + stored_key[-4:] if len(stored_key) > 12 else "••••••••"
-            st.markdown(f'<div style="font-size:0.78rem;color:#6fcf97;">Current: {masked}</div>', unsafe_allow_html=True)
+        # ── Provider selector ─────────────────────────────────────
+        st.markdown('<p style="color:#ffffff;font-weight:600;margin-top:0.5rem;">🔀 AI Provider</p>', unsafe_allow_html=True)
+        current_provider = st.session_state.get("admin_provider", _DEFAULT_PROVIDER)
+        selected_provider = st.radio(
+            "Provider",
+            ["openrouter", "groq"],
+            index=0 if current_provider == "openrouter" else 1,
+            format_func=lambda x: "🌐 OpenRouter (Claude Haiku / free models)" if x == "openrouter" else "⚡ Groq (Llama / Mixtral / Gemma)",
+            label_visibility="collapsed",
+            horizontal=True,
+        )
 
-        # ── Model selector ─────────────────────────────────────────
+        # ── API Keys ──────────────────────────────────────────────
+        if selected_provider == "openrouter":
+            st.markdown('<p style="color:#ffffff;font-weight:600;margin-top:1rem;">🔑 OpenRouter API Key</p>', unsafe_allow_html=True)
+            st.caption("Get free key → openrouter.ai/keys · Free models available · Claude Haiku $1/$5 per M tokens")
+            stored_or  = st.session_state.get("platform_or_key",  os.environ.get("OPENROUTER_API_KEY", ""))
+            new_or_key = st.text_input("OR Key", value=stored_or, type="password",
+                                        placeholder="sk-or-v1-...", label_visibility="collapsed")
+            if stored_or:
+                masked = stored_or[:8] + "••••••••" + stored_or[-4:] if len(stored_or) > 12 else "••••••••"
+                st.markdown(f'<div style="font-size:0.78rem;color:#6fcf97;">Active key: {masked}</div>', unsafe_allow_html=True)
+            new_key = new_or_key
+        else:
+            st.markdown('<p style="color:#ffffff;font-weight:600;margin-top:1rem;">🔑 Groq API Key</p>', unsafe_allow_html=True)
+            st.caption("Get free key → console.groq.com · Always free · Rate limits apply")
+            stored_gq  = st.session_state.get("platform_groq_key", os.environ.get("GROQ_API_KEY", ""))
+            new_gq_key = st.text_input("Groq Key", value=stored_gq, type="password",
+                                        placeholder="gsk_...", label_visibility="collapsed")
+            if stored_gq:
+                masked = stored_gq[:8] + "••••••••" + stored_gq[-4:] if len(stored_gq) > 12 else "••••••••"
+                st.markdown(f'<div style="font-size:0.78rem;color:#6fcf97;">Active key: {masked}</div>', unsafe_allow_html=True)
+            new_key = new_gq_key
+
+        # ── Model selector — shows correct list per provider ──────
         st.markdown('<p style="color:#ffffff;font-weight:600;margin-top:1.2rem;">🤖 Default AI Model</p>', unsafe_allow_html=True)
-        st.markdown('<p style="color:rgba(255,255,255,0.6);font-size:0.82rem;">This model is used for all tools across the entire app.</p>', unsafe_allow_html=True)
-        current_model = st.session_state.get("admin_model_choice", list(OPENROUTER_MODELS.keys())[0])
+        model_dict    = OPENROUTER_MODELS if selected_provider == "openrouter" else GROQ_MODELS
+        current_model = st.session_state.get("admin_model_choice", list(model_dict.keys())[0])
+        if current_model not in model_dict:
+            current_model = list(model_dict.keys())[0]
         selected_model = st.selectbox(
             "Default Model",
-            list(OPENROUTER_MODELS.keys()),
-            index=list(OPENROUTER_MODELS.keys()).index(current_model) if current_model in OPENROUTER_MODELS else 0,
-            format_func=lambda x: OPENROUTER_MODELS[x],
-            label_visibility="collapsed"
+            list(model_dict.keys()),
+            index=list(model_dict.keys()).index(current_model),
+            format_func=lambda x: model_dict[x],
+            label_visibility="collapsed",
         )
         model_tips = {
-            "anthropic/claude-haiku-4-5":    "⭐ Best undetection — Claude token distribution fools GPTZero & Originality.ai",
-            "anthropic/claude-3-5-haiku":    "🏆 Strongest quality + undetection — ideal for long academic texts",
-            "anthropic/claude-3-haiku":      "⚡ Ultra cheap — still beats all Llama models for undetection",
-            "mistralai/mistral-7b-instruct": "💨 Fastest fallback — use for paraphrasing/grammar only, not humanizing",
+            # OpenRouter
+            "anthropic/claude-haiku-4-5":              "⭐ Best AI-detection bypass — Claude token patterns fool GPTZero & Originality.ai",
+            "anthropic/claude-3-5-haiku":              "🏆 Strongest quality + undetection — ideal for long academic texts",
+            "anthropic/claude-3-haiku":                "⚡ Ultra cheap Claude — still beats Llama for undetection",
+            "google/gemini-flash-1.5":                 "💡 Google Gemini — good quality, free tier available on OpenRouter",
+            "meta-llama/llama-3.3-70b-instruct:free":  "🆓 Completely free · GPT-4 level quality · 200 req/day limit",
+            "mistralai/mistral-7b-instruct:free":      "🆓 Completely free · Use for grammar/paraphrase only",
+            # Groq
+            "llama-3.3-70b-versatile": "🏆 Best Groq model — fast, free, GPT-4 level quality",
+            "llama-3.1-8b-instant":    "⚡ Ultra fast — good for grammar checking and paraphrasing",
+            "mixtral-8x7b-32768":      "📄 Long context — best for large document processing",
+            "gemma2-9b-it":            "⚖️ Balanced — solid all-rounder for mixed tasks",
         }
         st.caption(model_tips.get(selected_model, ""))
 
         if st.button("💾 Save Settings", type="primary", use_container_width=True):
-            st.session_state.platform_groq_key  = new_key
+            st.session_state.admin_provider     = selected_provider
             st.session_state.admin_model_choice = selected_model
-            st.success(f"✅ Saved — Model: {GROQ_MODELS[selected_model]}")
+            # Store key in the correct slot
+            if selected_provider == "openrouter":
+                st.session_state.platform_or_key   = new_key
+                st.session_state.platform_groq_key = st.session_state.get("platform_groq_key", "")
+            else:
+                st.session_state.platform_groq_key = new_key
+                st.session_state.platform_or_key   = st.session_state.get("platform_or_key", "")
+            st.success(f"✅ Saved — {selected_provider.upper()} · {model_dict[selected_model]}")
 
         st.markdown("---")
         st.markdown("**To persist permanently (Streamlit Cloud):**")
-        st.code('''# Settings → Secrets in Streamlit Cloud:
-OPENROUTER_API_KEY = "sk-or-v1-your_key_here"
-ADMIN_PASSWORD = "your_admin_password"
-# Free key: https://openrouter.ai/keys''', language="toml")
+        st.code('''# Set EITHER or BOTH in Streamlit Cloud → Settings → Secrets:
+OPENROUTER_API_KEY = "sk-or-v1-your_key_here"   # openrouter.ai/keys
+GROQ_API_KEY       = "gsk_your_key_here"          # console.groq.com
+ADMIN_PASSWORD     = "your_admin_password"
+# Switch provider anytime in Admin panel — no redeploy needed''', language="toml")
 
     with adm_tab2:
         st.markdown('<div class="card-title">📊 App Info</div>', unsafe_allow_html=True)
@@ -2302,8 +2393,9 @@ ADMIN_PASSWORD = "your_admin_password"
             ("Version", "v6.2 · Zodha"),
             ("Mode", "Single-user · No login required"),
             ("Tools", "Humanizer · Paraphraser · Grammar Checker · Research Tools · Statistics Suite · Publication Suite"),
-            ("Backend", "OpenRouter API · Claude Haiku 4.5"),
-            ("Models", "Claude Haiku 4.5 · Claude 3.5 Haiku · Claude 3 Haiku · Mistral 7B"),
+            ("Backend", f"{st.session_state.get('admin_provider', _DEFAULT_PROVIDER).upper()} API"),
+            ("OpenRouter models", "Claude Haiku 4.5 · Claude 3.5 Haiku · Gemini Flash · Llama 3.3 70B (free)"),
+            ("Groq models", "Llama 3.3 70B · Llama 3.1 8B · Mixtral 8x7B · Gemma 2 9B"),
             ("Max Words/Session", "Unlimited"),
         ]
         for label, val in info_items:
@@ -2334,18 +2426,27 @@ with st.sidebar:
     st.markdown("### 🔧 Intensity")
     intensity = st.radio("Intensity", ["Light","Moderate","Deep"], index=1, label_visibility="collapsed")
 
-    # Model and API key are resolved silently — not shown to user
-    # Admin sets the platform key via the Admin panel
-    model_choice = st.session_state.get("admin_model_choice", list(OPENROUTER_MODELS.keys())[0])
+    # ── Resolve provider + model + key (admin-controlled) ────────────────────
+    _active_provider = st.session_state.get("admin_provider", _DEFAULT_PROVIDER)
+    _active_model_dict = OPENROUTER_MODELS if _active_provider == "openrouter" else GROQ_MODELS
+    model_choice = st.session_state.get("admin_model_choice", list(_active_model_dict.keys())[0])
+    if model_choice not in _active_model_dict:
+        model_choice = list(_active_model_dict.keys())[0]
 
-    # Resolve key: admin-set platform key > GROQ_API_KEY env var (no user input)
-    env_key      = os.environ.get("OPENROUTER_API_KEY", os.environ.get("GROQ_API_KEY", ""))
-    groq_key     = st.session_state.get("platform_groq_key", env_key)
+    # Resolve correct API key for the active provider
+    if _active_provider == "openrouter":
+        env_key  = os.environ.get("OPENROUTER_API_KEY", "")
+        groq_key = st.session_state.get("platform_or_key", env_key)
+        _provider_label = f"🌐 OpenRouter · {_active_model_dict.get(model_choice, model_choice).split(" · ")[0]}"
+    else:
+        env_key  = os.environ.get("GROQ_API_KEY", "")
+        groq_key = st.session_state.get("platform_groq_key", env_key)
+        _provider_label = f"⚡ Groq · {_active_model_dict.get(model_choice, model_choice).split(" · ")[0]}"
 
     if groq_key:
-        st.markdown('<div style="font-size:0.72rem;color:#6fcf97;margin-top:0.3rem;">✅ OpenRouter · Claude Haiku ready</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:0.72rem;color:#6fcf97;margin-top:0.3rem;">✅ {_provider_label} ready</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div style="font-size:0.72rem;color:#e8c97a;margin-top:0.3rem;">⚠️ OpenRouter key not configured</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:0.72rem;color:#e8c97a;margin-top:0.3rem;">⚠️ {_active_provider.title()} key not configured</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("""<div style="font-size:0.72rem;color:rgba(255,255,255,0.35);line-height:1.7;">
@@ -2495,9 +2596,9 @@ style="background:#1a2e1b;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
                 st.rerun()
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
-                    st.error("⚠️ OpenRouter rate limit. Wait a moment or add credits at openrouter.ai")
+                    st.error("⚠️ Rate limit hit. Groq: wait 1 min. OpenRouter: wait or add $5 credits at openrouter.ai")
                 elif e.response.status_code == 401:
-                    st.error("❌ Invalid OpenRouter API key. Get one free at openrouter.ai/keys")
+                    st.error("❌ Invalid API key. Check your Groq key (console.groq.com) or OpenRouter key (openrouter.ai/keys) in the Admin panel.")
                 else:
                     st.error(f"❌ HTTP Error: {e}")
             except Exception as e:
