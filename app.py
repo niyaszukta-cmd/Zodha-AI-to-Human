@@ -766,7 +766,7 @@ def call_groq(api_key, model, system_prompt, user_prompt, max_tokens=2048, strea
                 {"role": "user",   "content": user_prompt},
             ],
             "max_tokens": max_tokens,
-            "temperature": 0.85,
+            "temperature": 0.95,   # raised for lower perplexity / AI detection bypass
             "stream": stream,
         }
         resp = requests.post(
@@ -854,7 +854,299 @@ def humanize_streaming(api_key, model, chunk, style, intensity, placeholder):
         render_output(full_text, cursor=True)
 
     render_output(full_text, cursor=False)
+    # Apply word-swap post-processor (zero API cost)
+    full_text = word_swap_postprocess(full_text)
     return full_text
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WORD-SWAP POST-PROCESSOR
+# Replaces the 100 most AI-detectable high-frequency words with low-probability
+# but semantically identical alternatives. Zero API cost.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_WORD_SWAP_MAP = {
+    # Banned AI transitions (full word/phrase replacements)
+    "Furthermore,":       "Beyond this,",
+    "Furthermore":        "Beyond this",
+    "Moreover,":          "What is more,",
+    "Moreover":           "What is more",
+    "Additionally,":      "On top of this,",
+    "Additionally":       "On top of this",
+    "In conclusion,":     "Taken together,",
+    "In conclusion":      "Taken together",
+    "In summary,":        "All told,",
+    "In summary":         "All told",
+    "To summarize,":      "Pulling these threads together,",
+    "To summarize":       "Pulling these threads together",
+    "In addition,":       "Beyond that,",
+    "In addition":        "Beyond that",
+    "Subsequently,":      "After this,",
+    "Subsequently":       "After this",
+    "Consequently,":      "As a result,",
+    "Nevertheless,":      "Even so,",
+    "Nevertheless":       "Even so",
+    "Nonetheless,":       "That said,",
+    "Nonetheless":        "That said",
+    "Notwithstanding,":   "Even allowing for this,",
+    "Notwithstanding":    "Even allowing for this",
+
+    # High-probability AI verbs → lower-frequency synonyms
+    "utilize":            "use",
+    "utilise":            "use",
+    "leverages":          "draws on",
+    "leverage":           "draw on",
+    "leveraged":          "drew on",
+    "facilitate":         "help",
+    "facilitates":        "helps",
+    "facilitated":        "helped",
+    "facilitating":       "helping",
+    "encompasses":        "covers",
+    "encompass":          "cover",
+    "encompasses":        "covers",
+    "prioritize":         "focus on",
+    "prioritise":         "focus on",
+    "prioritizes":        "focuses on",
+    "streamline":         "simplify",
+    "streamlines":        "simplifies",
+    "streamlined":        "simplified",
+    "implement":          "carry out",
+    "implements":         "carries out",
+    "implemented":        "carried out",
+    "implementing":       "carrying out",
+    "demonstrate":        "show",
+    "demonstrates":       "shows",
+    "demonstrated":       "showed",
+    "demonstrating":      "showing",
+
+    # AI filler phrases
+    "It is important to note that":   "Worth noting:",
+    "It is worth noting that":        "Notably,",
+    "It is worth mentioning that":    "One detail worth flagging:",
+    "It should be noted that":        "As a side note,",
+    "It is crucial to":               "One must",
+    "It is essential to":             "One needs to",
+    "plays a crucial role":           "sits at the centre of",
+    "plays a key role":               "matters significantly",
+    "plays an important role":        "carries real weight",
+    "state-of-the-art":               "leading",
+    "cutting-edge":                   "current",
+    "innovative solution":            "practical approach",
+    "robust":                         "solid",
+    "comprehensive":                  "thorough",
+    "in today's rapidly changing world": "in the current climate",
+    "in today's world":               "today",
+    "in recent years":                "recently",
+    "over the past few years":        "in recent years",
+    "due to the fact that":           "because",
+    "in order to":                    "to",
+    "a wide range of":                "various",
+    "a variety of":                   "several",
+    "a number of":                    "several",
+    "in the realm of":                "in",
+    "with respect to":                "regarding",
+    "with regard to":                 "regarding",
+    "in terms of":                    "for",
+    "on the other hand,":             "by contrast,",
+    "on the other hand":              "by contrast",
+
+    # Over-polished connectors
+    "exemplify this pattern":         "follow this logic",
+    "a thread unites":                "something connects",
+    "operate on different terrain":   "work differently",
+    "taken as a whole":               "overall",
+    "as previously mentioned":        "as noted earlier",
+    "as mentioned above":             "as above",
+    "it goes without saying":         "clearly",
+    "needless to say":                "of course",
+    "last but not least":             "finally",
+    "in light of":                    "given",
+    "in the context of":              "within",
+    "by virtue of":                   "through",
+    "as a consequence":               "as a result",
+}
+
+def word_swap_postprocess(text: str) -> str:
+    """
+    Apply word-swap map to humanized output.
+    Case-sensitive phrase matching with word boundary awareness for single words.
+    Preserves paragraph structure completely.
+    """
+    import re as _re
+
+    result = text
+
+    # Sort by length descending so longer phrases match before substrings
+    for ai_word, human_word in sorted(_WORD_SWAP_MAP.items(),
+                                      key=lambda x: len(x[0]), reverse=True):
+        if ' ' in ai_word:
+            # Multi-word phrase: direct replacement (case-sensitive)
+            result = result.replace(ai_word, human_word)
+            # Also try lowercase version
+            result = result.replace(ai_word.lower(), human_word.lower())
+        else:
+            # Single word: use word boundaries to avoid partial matches
+            # Preserve original capitalisation pattern
+            def _replace_word(m):
+                orig = m.group(0)
+                if orig[0].isupper():
+                    return human_word.capitalize() if len(human_word.split()) == 1 else human_word
+                return human_word
+            pattern = _re.compile(r'\b' + _re.escape(ai_word) + r'\b', _re.IGNORECASE)
+            result = pattern.sub(_replace_word, result)
+
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECOND-PASS PROMPT (sentence opener + transition entropy pass)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SECOND_PASS_SYSTEM = (
+    "You are a human editor doing a final pass on a piece of text before submitting it. "
+    "Your ONLY job: make the sentence openers and paragraph transitions unpredictable. "
+    "Do not change any content, facts, or meaning."
+)
+
+_SECOND_PASS_RULES = """
+SECOND-PASS INSTRUCTIONS — do ONLY these targeted fixes:
+
+1. SENTENCE OPENERS: Scan every sentence. If three or more consecutive sentences begin with
+   similar words or patterns (The X..., The Y..., The Z... / This is... / It is...), 
+   rewrite the opener of every third sentence differently:
+   - Invert to start with a prepositional phrase: "In practice, this means..."
+   - Start with a participle: "Working from this premise..."
+   - Start with a time/place anchor: "By 2023, the pattern had..."
+   - Start with a concessive: "Granted, the evidence..."
+   - Use a fragment opener: "The short version:"
+
+2. PARAGRAPH TRANSITIONS: If two paragraphs open with the same structural type 
+   (both start with "The...", or both start with a definition), change one.
+
+3. ADD ONE IMPERFECTION: Insert one deliberate hedge or self-correction per 200 words.
+   Examples: "— or something like it —" / "(though that may be too strong a claim)" /
+   "which is, admittedly, an imprecise way to put it" / "roughly speaking"
+
+4. OUTPUT: Return ONLY the revised text. Same word count ±5%. No commentary.
+"""
+
+def second_pass_humanize(api_key: str, model: str, text: str) -> str:
+    """Run a targeted second pass to break sentence-opener uniformity."""
+    input_words = len(text.split())
+    max_tok = max(256, min(3500, int(input_words * 1.15)))
+    resp = call_groq(
+        api_key, model,
+        _SECOND_PASS_SYSTEM,
+        f"{_SECOND_PASS_RULES}\n\nTEXT TO REFINE:\n\"\"\"\n{text}\n\"\"\"",
+        max_tokens=max_tok,
+        stream=False
+    )
+    result = resp.json()["choices"][0]["message"]["content"].strip()
+    # Strip any preamble the model might add
+    import re as _re2
+    result = _re2.sub(r"^(Here is|Here\'s|Below is|The revised|Revised)[^\n]*\n", "", result, flags=_re2.IGNORECASE)
+    return result if result.strip() else text
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STEALTHWRITER SCRAPER (Selenium-free, requests-based)
+# StealthWriter uses a Next.js frontend calling an internal API.
+# We POST directly to their internal endpoint, mimicking the browser session.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SW_HEADERS_BASE = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/124.0.0.0 Safari/537.36",
+    "Accept":          "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Origin":          "https://stealthwriter.ai",
+    "Referer":         "https://stealthwriter.ai/",
+    "sec-ch-ua": '\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"',
+    "sec-ch-ua-mobile":   "?0",
+    "sec-ch-ua-platform": '\"macOS\"',
+    "sec-fetch-dest":     "empty",
+    "sec-fetch-mode":     "cors",
+    "sec-fetch-site":     "same-origin",
+}
+
+_SW_ENDPOINTS = [
+    ("POST", "https://stealthwriter.ai/api/humanize"),
+    ("POST", "https://stealthwriter.ai/api/v1/humanize"),
+    ("POST", "https://stealthwriter.ai/api/rewrite"),
+    ("POST", "https://stealthwriter.ai/_next/data/humanize"),
+    ("POST", "https://api.stealthwriter.ai/v1/humanize"),
+    ("POST", "https://api.stealthwriter.ai/humanize"),
+]
+
+def stealthwriter_humanize(text: str, mode: str = "Ghost") -> dict:
+    """
+    Attempt to humanize text via StealthWriter\'s internal API.
+    Returns: {"success": bool, "text": str, "error": str}
+    
+    StealthWriter modes: "Ghost", "Aggressive", "Light"
+    Note: This uses their free tier. May require CAPTCHA bypass or fail if they
+    detect automation — in which case falls back gracefully.
+    """
+    import requests as _req, json as _json, re as _re
+
+    session = _req.Session()
+    session.headers.update(_SW_HEADERS_BASE)
+
+    # Step 1: Fetch main page to get cookies / CSRF token
+    try:
+        home = session.get("https://stealthwriter.ai", timeout=10)
+        # Look for CSRF token or next-auth token in response
+        csrf_match = _re.search(r'"csrfToken":"([^"]+)"', home.text)
+        next_token = _re.search(r'"token":"([^"]+)"', home.text)
+        build_id   = _re.search(r'"buildId":"([^"]+)"', home.text)
+    except Exception as e:
+        return {"success": False, "text": "", "error": f"StealthWriter unreachable: {e}"}
+
+    # Step 2: Try each known endpoint
+    payloads = [
+        {"text": text, "mode": mode, "type": mode.lower()},
+        {"content": text, "mode": mode},
+        {"input": text, "humanize_level": mode.lower()},
+        {"text": text},
+    ]
+
+    for method, url in _SW_ENDPOINTS:
+        for payload in payloads:
+            try:
+                r = session.post(url, json=payload, timeout=20)
+                if r.status_code == 200:
+                    data = r.json()
+                    # Try to extract humanized text from various response shapes
+                    for key in ["humanized", "result", "text", "output", "content", "data"]:
+                        if key in data and isinstance(data[key], str) and len(data[key]) > 20:
+                            return {"success": True, "text": data[key].strip(), "error": ""}
+                    # If top-level is a string
+                    if isinstance(data, str) and len(data) > 20:
+                        return {"success": True, "text": data.strip(), "error": ""}
+            except Exception:
+                continue
+
+    # Step 3: Try Next.js API route format with build ID
+    if build_id:
+        bid = build_id.group(1)
+        next_url = f"https://stealthwriter.ai/_next/data/{bid}/index.json"
+        try:
+            r = session.post(next_url, json={"text": text}, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                for key in ["humanized", "result", "text", "output"]:
+                    if key in data and isinstance(data[key], str) and len(data[key]) > 20:
+                        return {"success": True, "text": data[key].strip(), "error": ""}
+        except Exception:
+            pass
+
+    return {
+        "success": False,
+        "text": "",
+        "error": "StealthWriter API endpoint not found — they may have updated their app. Falling back to internal humanizer."
+    }
 
 def paraphrase_text(api_key, model, text, mode):
     fmt = detect_format(text)
@@ -2205,6 +2497,7 @@ div[data-testid="stAlert"] p{color:#1a2e1b!important;}
 for k,v in [("output_text",""),("paraphrase_out",""),
              ("grammar_corrected",""),("grammar_issues",[]),
              ("admin_provider", _DEFAULT_PROVIDER),("platform_or_key",""),
+             ("enable_second_pass",False),("enable_stealthwriter",False),
              ("clear_input",False),("clear_para",False),("clear_gram",False),
              ("clear_spss",False),("clear_meth",False),("clear_hyp",False),
              ("clear_jm",False),("clear_cl",False),("clear_rv",False),("clear_cs",False),
@@ -2571,6 +2864,12 @@ style="background:#1a2e1b;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
     st.markdown("<br>", unsafe_allow_html=True)
     btn_c, info_c = st.columns([2,3])
     with btn_c:
+        # ── Enhancement options ────────────────────────────────
+        st.markdown('<p style="color:#a8d5aa;font-size:0.78rem;font-weight:700;margin-top:0.4rem;letter-spacing:0.5px;">⚙️ ENHANCEMENT OPTIONS</p>', unsafe_allow_html=True)
+        enable_second_pass = st.toggle("🔄 Two-pass mode", value=False,
+            help="Run a second AI pass targeting sentence openers and transitions. ~2× processing time. Significantly improves Turnitin scores.")
+        enable_stealthwriter = st.toggle("🥷 Try StealthWriter", value=False,
+            help="Send output through StealthWriter's free humanizer after AI processing. Falls back gracefully if unavailable.")
         run_btn = st.button("⚡ Humanize (Streaming)", type="primary",
                             use_container_width=True, disabled=(not input_text.strip()))
     with info_c:
@@ -2605,8 +2904,30 @@ style="background:#1a2e1b;color:#6fcf97;border:1px solid #4a7c59;border-radius:7
                     else:
                         text_out = humanize_streaming(groq_key, model_choice, chunk, style, intensity, stream_placeholder)
                     results.append(text_out)
+                progress_bar.progress(0.9, text="🔤 Applying word-swap post-processor…")
+                final_text = "\n\n".join(results)
+
+                # ── Second-pass mode ────────────────────────────────
+                if enable_second_pass and final_text.strip():
+                    progress_bar.progress(0.93, text="🔄 Running second-pass entropy boost…")
+                    try:
+                        final_text = second_pass_humanize(groq_key, model_choice, final_text)
+                        final_text = word_swap_postprocess(final_text)  # re-apply after 2nd pass
+                    except Exception as _e2:
+                        st.warning(f"⚠️ Second pass failed (continuing with first pass): {_e2}")
+
+                # ── StealthWriter pass ──────────────────────────────
+                if enable_stealthwriter and final_text.strip():
+                    progress_bar.progress(0.96, text="🥷 Sending to StealthWriter…")
+                    sw_result = stealthwriter_humanize(final_text, mode="Ghost")
+                    if sw_result["success"] and sw_result["text"].strip():
+                        final_text = word_swap_postprocess(sw_result["text"])
+                        st.success("✅ StealthWriter pass applied successfully")
+                    else:
+                        st.info(f"ℹ️ StealthWriter: {sw_result['error']}")
+
                 progress_bar.progress(1.0, text="✅ Complete!")
-                st.session_state.output_text = "\n\n".join(results)
+                st.session_state.output_text = final_text
                 time.sleep(0.3)
                 st.rerun()
             except requests.exceptions.HTTPError as e:
